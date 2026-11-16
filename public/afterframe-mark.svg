@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="AfterFrame">
+  <defs>
+    <linearGradient id="af-brand" x1="3" y1="3" x2="29" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ec4899" />
+      <stop offset="0.55" stop-color="#9333ea" />
+      <stop offset="1" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="af-sheen" x1="6" y1="2" x2="26" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <!-- the frame -->
+  <rect x="3" y="3" width="26" height="26" rx="8" fill="url(#af-brand)" />
+  <!-- top sheen: reads as glass on dark, stays visible on light -->
+  <rect x="3" y="3" width="26" height="26" rx="8" fill="url(#af-sheen)" />
+  <!-- the frame that comes after: a play head, solid white so it never fades -->
+  <path d="M12.6 9.9a1.15 1.15 0 0 1 1.77-.98l8.62 5.6a1.36 1.36 0 0 1 0 2.29l-8.62 5.6a1.15 1.15 0 0 1-1.77-.98Z" fill="#ffffff" />
+</svg>

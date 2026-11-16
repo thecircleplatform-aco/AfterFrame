@@ -1,0 +1,24 @@
+﻿name = "afterframe-auth"
+main = "src/index.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[vars]
+# Where the emailed reset link points.
+APP_ORIGIN = "https://afterframe.acocloud.app"
+# The only origins allowed to send credentials (comma separated, no wildcards).
+APP_ORIGINS = "https://afterframe.acocloud.app,http://localhost:5173"
+# Outgoing mail is handled by the existing afterframe-mail worker.
+MAIL_URL = "https://mailer.acocloud.app/"
+# Google OAuth client. These two must match a "Web application" client in
+# console.cloud.google.com → APIs & Services → Credentials, with
+# https://afterframe.acocloud.app/ listed under Authorized redirect URIs
+# (and http://localhost:5199/ for local development).
+# GOOGLE_CLIENT_ID goes here; the secret is a secret:
+#   wrangler secret put GOOGLE_CLIENT_SECRET --config auth-worker/wrangler.toml
+GOOGLE_CLIENT_ID = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "afterframe-auth"
+database_id = "2208907d-226b-4511-ab56-28800f21d85c"

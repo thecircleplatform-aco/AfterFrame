@@ -1,0 +1,23 @@
+/* Animated icons for agent tool rows — bare glyphs, no chip or outline.
+   Running = the glyph itself pulses and breathes. */
+
+@keyframes cc-tool-badge-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.9); }
+}
+
+.cc-tool-badge > svg {
+  display: block;
+}
+
+.cc-tool-badge[data-state='running'] {
+  animation: cc-tool-badge-pulse 1.35s ease-in-out infinite;
+  transform-origin: 50% 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-tool-badge[data-state='running'] {
+    animation: none !important;
+    opacity: 1;
+  }
+}

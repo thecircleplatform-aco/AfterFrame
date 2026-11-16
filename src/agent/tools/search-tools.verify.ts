@@ -1,0 +1,65 @@
+// search_content tool verify: URL construction, hit mapping, error paths.
+// (The real Agent chain needs a dev server; this covers the handler logic.)
+import assert from 'node:assert/strict';
+import { execSearchTool } from './search-tools';
+
+const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+
+function installFetch(respond: (url: string) => unknown): void {
+  calls.length = 0;
+  (globalThis as Record<string, unknown>).fetch = async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push({ url, headers: { 'sec-fetch-site': 'same-origin' } });
+    const body = respond(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => body,
+    } as Response;
+  };
+}
+
+async function main(): Promise<void> {
+  // ── hit mapping ──
+  installFetch(() => ({
+    hits: [
+      { kind: 'chat', projectId: 'p-1', ref: 'chat:p-1:2', score: -0.5 },
+      { kind: 'caption', projectId: 'p-2', ref: 'project:p-2:captions', score: -1.2 },
+    ],
+  }));
+  const result = await execSearchTool('search_content', { query: '\u80cc\u666f\u97f3\u4e50\u97f3\u91cf' });
+  const hits = (result as { hits: Array<{ kind: string; where: string; score: number }> }).hits;
+  assert.equal(hits.length, 2);
+  assert.ok(calls[0]!.url.includes('/api/project-store/search?q='), 'must hit the search endpoint');
+  assert.ok(calls[0]!.url.includes(encodeURIComponent('\u80cc\u666f\u97f3\u4e50\u97f3\u91cf')), 'query must be encoded');
+  assert.equal(hits[0]!.kind, 'chat');
+  assert.equal(hits[0]!.where, '\u5de5\u7a0b p-1 \u7b2c 3 \u6761\u6d88\u606f', 'chat ref must map to a message position');
+  assert.equal(hits[1]!.where, '\u5de5\u7a0b p-2 \u7684\u5b57\u5e55');
+  assert.ok(hits[0]!.score >= hits[1]!.score, 'scores must descend');
+
+  // ── project scoping + limit ──
+  installFetch(() => ({ hits: [] }));
+  await execSearchTool('search_content', { query: '\u8f6c\u573a', projectId: 'p-9', limit: 5 });
+  assert.ok(calls[0]!.url.includes('project=p-9'), 'projectId must be appended');
+  assert.ok(calls[0]!.url.includes('limit=5'), 'limit must be appended');
+
+  // ── validation ──
+  const missing = await execSearchTool('search_content', {});
+  assert.equal((missing as { error: string }).error, 'query is required');
+  const wrongName = await execSearchTool('search_fonts', { query: 'x' });
+  assert.ok((wrongName as { error: string }).error.includes('unknown tool'));
+
+  // ── fetch failure → friendly error ──
+  (globalThis as Record<string, unknown>).fetch = async () => {
+    throw new Error('network down');
+  };
+  const failed = await execSearchTool('search_content', { query: '\u5b57\u5e55' });
+  assert.equal((failed as { error: string }).error, 'network down');
+
+  console.log('✓ search_content tool verify: URL/hits/errors all passed');
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "afterframe": {
+      "type": "http",
+      "url": "http://localhost:5199/api/external-mcp/mcp",
+      "headers": {
+        "x-afterframe-mcp-client": "claude-code",
+        "x-afterframe-mcp-surface": "external"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+export default {
+  'Review comments': 'ความคิดเห็นรีวิว',
+  'Comments': 'ความคิดเห็น',
+  'Failed to load comments': 'โหลดความคิดเห็นไม่สำเร็จ',
+  'Failed to save comment': 'บันทึกความคิดเห็นไม่สำเร็จ',
+  'Failed to save reply': 'บันทึกการตอบกลับไม่สำเร็จ',
+  'Add a review comment at the current frame': 'เพิ่มความคิดเห็นรีวิวที่เฟรมปัจจุบัน',
+  'Anchors to this frame and, when available, the clip and source position': 'ผูกกับเฟรมนี้ และบันทึกคลิปกับตำแหน่งแหล่งเมื่อมี',
+  'Add comment': 'เพิ่มความคิดเห็น',
+  'No review comments yet': 'ยังไม่มีความคิดเห็นรีวิว',
+  'Clip': 'คลิป',
+  'Timeline': 'ไทม์ไลน์',
+  'Write a reply': 'เขียนตอบกลับ',
+  'Reply': 'ตอบกลับ',
+  'Reopen': 'เปิดใหม่',
+  'Resolve': 'แก้ไขแล้ว',
+  'Delete comment': 'ลบความคิดเห็น',
+} satisfies Record<string, string>;

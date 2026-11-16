@@ -1,0 +1,47 @@
+services:
+  afterframe:
+    build: .
+    image: afterframe:latest
+    restart: unless-stopped
+    # Only reachable from the proxy container / host loopback.
+    ports:
+      - "127.0.0.1:5199:5199"
+    environment:
+      NODE_ENV: production
+      # All projects, uploads, keystore and agent runs live under $HOME,
+      # so pointing HOME at the volume keeps every write persistent.
+      HOME: /data
+      # Free-tier cost control: the browser encodes every export, this box never
+      # renders. See server/plugins/server-render-gate.ts.
+      AFTERFRAME_SERVER_EXPORT: ${AFTERFRAME_SERVER_EXPORT:-off}
+      AFTERFRAME_SERVER_STILLS: ${AFTERFRAME_SERVER_STILLS:-off}
+      # Uncomment to override individual keys instead of using .env.local:
+      # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    volumes:
+      - ./data:/data
+      - ./.env.local:/app/.env.local:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5199/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - afterframe
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      AFTERFRAME_DOMAIN: ${AFTERFRAME_DOMAIN:-video.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

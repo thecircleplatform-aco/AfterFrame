@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="AfterFrame">
+  <defs>
+    <!-- Frame with the play head knocked out, so the mark stays legible on any
+         background: one flat colour, no gradient, no second shape. -->
+    <mask id="af-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="#000" />
+      <rect x="3" y="3" width="26" height="26" rx="8" fill="#fff" />
+      <path d="M12.6 9.9a1.15 1.15 0 0 1 1.77-.98l8.62 5.6a1.36 1.36 0 0 1 0 2.29l-8.62 5.6a1.15 1.15 0 0 1-1.77-.98Z" fill="#000" />
+    </mask>
+  </defs>
+  <rect width="32" height="32" fill="#ffffff" mask="url(#af-cut)" />
+</svg>

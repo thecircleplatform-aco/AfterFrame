@@ -1,0 +1,12 @@
+{
+  "name": "afterframe-agent-standalone",
+  "private": true,
+  "type": "module",
+  "description": "AfterFrame agent runtime, extracted and hosted on its own server + UI. Reuses the production agent code in-place (no fork, no drift).",
+  "scripts": {
+    "dev": "vite --config vite.config.mts",
+    "dev:visible": "vite --config vite.config.mts --host 127.0.0.1 --port 5199",
+    "headless": "tsx server/headless.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

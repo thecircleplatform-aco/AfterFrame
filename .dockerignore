@@ -1,0 +1,17 @@
+# --- build context trim (image stays small, build stays fast) ---
+.git
+.github
+node_modules
+dist
+server-dist
+release
+out
+data
+docs
+assets/readme-pic
+assets/thumbnails
+*.log
+.env.local
+.env*.local
+.cf-token.local
+token-backup.local

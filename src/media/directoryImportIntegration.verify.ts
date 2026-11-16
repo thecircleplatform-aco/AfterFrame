@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const [controller, library, panel, converter, fileImport, dictionary] = await Promise.all([
+  readFile(new URL('../editor/useEditorController.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../library/LibraryPanel.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('./MediaPoolPanel.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('./directoryImportAsset.ts', import.meta.url), 'utf8'),
+  readFile(new URL('./useMediaPoolFileImport.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../i18n/dict/en/media.ts', import.meta.url), 'utf8'),
+]);
+
+assert.match(
+  controller,
+  /onIngestDirectoryAsset: ingestToPool/,
+  'watched descriptors must enter the established ingestToPool/EditorCommands path',
+);
+const watchOwner = library.indexOf('const directoryImport = useDirectoryImport');
+const conditionalMediaPanel = library.indexOf(') : isMyAssets ? (');
+assert.ok(
+  watchOwner >= 0 && watchOwner < conditionalMediaPanel,
+  'always-mounted LibraryPanel must own the watch before the conditional media-tab subtree',
+);
+assert.match(
+  library,
+  /useDirectoryImport\(\{[\s\S]*?ingest: onIngestDirectoryAsset/,
+  'the lifetime owner binds watched assets to the established ingest callback',
+);
+assert.doesNotMatch(panel, /useDirectoryImport\(/, 'media-tab unmount must not own or stop the watch');
+assert.match(panel, /directoryImport: UseDirectoryImportState/, 'media pool consumes watch controls as state');
+assert.match(
+  fileImport,
+  /if \(!hasDirectoryEntries\(transfer\)\)[\s\S]*?importFiles\(transfer\.files, folderId\)/,
+  'flat DataTransfer.files must bypass recursive collection and keep the established importer',
+);
+assert.doesNotMatch(
+  converter,
+  /normalizeUploadedVideo|fetch\(/,
+  'renderer must never start watched-file normalization outside main-owned cancellation authority',
+);
+assert.match(converter, /compatibilityNormalized !== true/, 'ordinary videos require a backend-ready descriptor');
+assert.ok(panel.split('\n').length <= 500, 'MediaPoolPanel must stay below the source-file line cap');
+for (const key of [
+  '\u5bfc\u5165\u6587\u4ef6\u5939…',
+  '\u76d1\u542c\u6587\u4ef6\u5939（\u81ea\u52a8\u5bfc\u5165\u65b0\u7d20\u6750）…',
+  '\u505c\u6b62\u76d1\u542c\u6587\u4ef6\u5939\u300c{dir}\u300d',
+  '\u76d1\u542c\u6587\u4ef6\u5939\u5bfc\u5165\u5931\u8d25：{error}',
+  '\u76d1\u542c\u76ee\u5f55\u4e2d\u7684\u89c6\u9891\u5c1a\u672a\u5b8c\u6210\u517c\u5bb9\u6027\u5904\u7406',
+]) {
+  assert.ok(dictionary.includes(`'${key}'`), `English media dictionary must contain: ${key}`);
+}

@@ -1,0 +1,22 @@
+name = "afterframe-mail"
+main = "src/index.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[vars]
+# Sending domain. This must be the domain (or subdomain) verified in Resend — the
+# From address is only deliverable once its DKIM/SPF records are live there.
+MAIL_FROM = "AfterFrame <noreply@afterframe.acocloud.app>"
+# Where replies land. A real mailbox on our domain, not the send-only address.
+MAIL_REPLY_TO = "support@acocloud.app"
+ALLOWED_ORIGIN = "https://afterframe.acocloud.app"
+
+# Delivery: Resend (primary). Set the key once with
+#   wrangler secret put RESEND_API_KEY --config mail-worker/wrangler.toml
+# Receiving stays on Cloudflare Email Routing: MX records on the zone plus rules,
+# no binding and no code involved.
+#
+# Fallback only, and only for addresses verified under Email Routing. Leave it
+# commented out unless Email Routing is configured on this zone.
+# [[send_email]]
+# name = "EMAIL"

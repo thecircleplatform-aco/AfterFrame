@@ -1,0 +1,28 @@
+# Automatic HTTPS via Let's Encrypt. Set AFTERFRAME_DOMAIN in .env / compose env.
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$AFTERFRAME_DOMAIN:video.example.com} {
+	encode zstd gzip
+
+	# Media uploads and export streams run long: don't time out.
+	reverse_proxy afterframe:5199 {
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+		flush_interval -1
+	}
+
+	request_body {
+		max_size 4GB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

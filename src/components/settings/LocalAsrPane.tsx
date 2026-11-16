@@ -1,0 +1,293 @@
+// Settings →  → ： +
+// Models are NOT bundled — users pick and download them on demand through the
+// local hf-proxy (multi-source accelerated download into the disk cache).
+// Whisper is OpenAI's open-source model, so the official OpenAI mark is used.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { theme } from '../../theme';
+import { useT } from '../../i18n/locale';
+import { warmUpLocalAsr } from '../../transcript/local-asr';
+import { asrBackendPreference } from '../../transcript/deviceProfile';
+import { VendorIcon } from './vendorIcons';
+import type { AsrDownloadStatus } from '../../../shared/asr-models';
+import { ASR_INFERENCE_CONTRACT } from '../../../shared/asr-inference-contract';
+import type { LocalAsrEngine } from '../../transcript/local-asr-readiness';
+import { localAsrModelRowState, type LocalAsrModelRowState } from './localAsrModelRow';
+import { FieldRow, type FieldCtx } from './settingsVendorPane';
+import type { SettingsField } from './settingsSchema';
+import { mutateLocalAsrModel } from './local-asr-model-mutation';
+import {
+  desktopNativeInferenceEnabled,
+  setDesktopNativeInferenceEnabled,
+} from '../../transcript/desktop-inference-preference';
+import {
+  setVadSilenceRemovalPreference,
+  vadSilenceRemovalEnabled,
+} from '../../audio/vadPreference';
+
+interface AsrModelState {
+  id: string;
+  modelId: string;
+  label: string;
+  sizeLabel: string;
+  language: string;
+  downloaded: boolean;
+  onnxDownloaded?: boolean;
+  ggmlDownloaded?: boolean;
+  bytes: number;
+  task?: {
+    status: AsrDownloadStatus;
+    bytesDone?: number;
+    bytesTotal?: number;
+    filesDone?: number;
+    filesTotal?: number;
+    error?: string;
+  };
+}
+
+const POLL_MS = 1500;
+
+function modelSizeText(bytes: number): string {
+  if (bytes <= 0) return '';
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1024 ? ` · ${(mb / 1024).toFixed(1)}GB` : ` · ${Math.round(mb)}MB`;
+}
+
+export function LocalAsrPane({ fields, ctx }: { fields: readonly SettingsField[]; ctx: FieldCtx }) {
+  const t = useT();
+  const [models, setModels] = useState<AsrModelState[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const hasDesktopInference = Boolean(window.AfterFrameDesktop?.inference);
+  const [nativeInference, setNativeInference] = useState(desktopNativeInferenceEnabled);
+  const [desktopInferenceSupported, setDesktopInferenceSupported] = useState(false);
+  const [nativeAsrAvailable, setNativeAsrAvailable] = useState(false);
+  const [webgpuAccel, setWebgpuAccel] = useState(() => asrBackendPreference() === 'webgpu');
+  const [vadSilence, setVadSilence] = useState(vadSilenceRemovalEnabled);
+  useEffect(() => {
+    let active = true;
+    const inference = window.AfterFrameDesktop?.inference;
+    if (inference) {
+      void inference.getCapabilities()
+        .then((capabilities) => {
+          if (active) {
+            setDesktopInferenceSupported(
+              capabilities.platform === 'darwin' || capabilities.platform === 'win32'
+                || capabilities.platform === 'linux',
+            );
+            setNativeAsrAvailable(capabilities.asr.available
+              && capabilities.asr.contractId === ASR_INFERENCE_CONTRACT.id);
+          }
+        })
+        .catch(() => undefined);
+    }
+    return () => { active = false; };
+  }, []);
+  // "Downloaded" means ready for the engine this client runs first: whisper.cpp
+  // needs only the GGML companion, the browser engine only the ONNX export.
+  const engine: LocalAsrEngine = nativeInference && nativeAsrAvailable ? 'native' : 'browser';
+  const toggleNativeInference = useCallback((enabled: boolean) => {
+    void setDesktopNativeInferenceEnabled(enabled)
+      .then(() => setNativeInference(enabled))
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      });
+  }, []);
+  const toggleWebgpuAccel = useCallback((enabled: boolean) => {
+    try {
+      if (enabled) {
+        localStorage.setItem('cc.asrBackend', 'webgpu');
+        // Re-allow WebGPU attempts when the user re-enables the toggle.
+        localStorage.removeItem('cc.asrWebgpuBroken');
+      } else {
+        localStorage.removeItem('cc.asrBackend');
+      }
+    } catch {
+      // Best-effort preference persistence.
+    }
+    setWebgpuAccel(enabled);
+  }, []);
+  const toggleVadSilence = useCallback((enabled: boolean) => {
+    setVadSilenceRemovalPreference(enabled);
+    setVadSilence(enabled);
+  }, []);
+
+  const downloadingRef = useRef<ReadonlySet<string>>(new Set());
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/asr-models', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { models?: AsrModelState[] };
+      const models = Array.isArray(body.models) ? body.models : [];
+      setModels(models);
+      setLoadError(null);
+      const current = new Set(models.filter((m) => m.task?.status === 'downloading').map((m) => m.id));
+      // A download just finished: warm the configured model with this catalog
+      // snapshot, avoiding a duplicate API request.
+      if (downloadingRef.current.size > 0 && current.size === 0) void warmUpLocalAsr(models);
+      downloadingRef.current = current;
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const anyDownloading = (models ?? []).some((m) => m.task?.status === 'downloading');
+  useEffect(() => {
+    if (!anyDownloading) return;
+    const timer = setInterval(() => { void refresh(); }, POLL_MS);
+    return () => clearInterval(timer);
+  }, [anyDownloading, refresh]);
+
+  const startDownload = useCallback(async (id: string) => {
+    setBusyId(id);
+    try {
+      await mutateLocalAsrModel('download', id);
+      await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }, [refresh]);
+
+  const deleteModel = useCallback(async (id: string) => {
+    setBusyId(id);
+    try {
+      await mutateLocalAsrModel('delete', id);
+      await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }, [refresh]);
+
+  const statusLabel = (m: AsrModelState, row: LocalAsrModelRowState): { text: string; color: string } => {
+    const task = m.task;
+    if (task?.status === 'downloading') {
+      // Byte totals are unknown before a file finishes; file-level progress
+      // advances reliably (configs first, then the big ONNX weights).
+      const pct = (task.filesTotal ?? 0) > 0
+        ? Math.min(100, Math.round((task.filesDone ?? 0) / (task.filesTotal ?? 1) * 100))
+        : 0;
+      return { text: t('Downloading {pct}%', { pct }), color: theme.accent };
+    }
+    if (task?.status === 'error') return { text: t('Download failed'), color: theme.danger };
+    if (row.ready) return { text: t('Downloaded'), color: theme.success };
+    return { text: t('Not downloaded'), color: theme.textDim };
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <VendorIcon vendor="openai" size={16} />
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{t('Default model')}</span>
+      </div>
+      {fields.map((field) => <FieldRow key={field.name} field={field} ctx={ctx} />)}
+      {hasDesktopInference && desktopInferenceSupported && (
+        <label style={{
+          display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px',
+          border: `0.5px solid ${theme.border}`, borderRadius: 8, background: theme.panel,
+        }}>
+          <input
+            type="checkbox"
+            checked={nativeInference}
+            onChange={(event) => toggleNativeInference(event.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{t('Desktop native inference')}</span>
+            <span style={{ fontSize: 11, color: theme.textDim, lineHeight: 1.45 }}>
+              {t('When enabled, transcription uses macOS Metal or the native CPU; visual, beat and music-embedding models pick Windows DirectML, Linux CUDA, macOS CoreML or browser WebGPU automatically, falling back to CPU or the browser engine on failure.')}
+            </span>
+          </span>
+        </label>
+      )}
+      <label style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px',
+        border: `0.5px solid ${theme.border}`, borderRadius: 8, background: theme.panel,
+      }}>
+        <input
+          type="checkbox"
+          checked={webgpuAccel}
+          onChange={(event) => toggleWebgpuAccel(event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{t('WebGPU transcription')}</span>
+        </span>
+      </label>
+      <label style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px',
+        border: `0.5px solid ${theme.border}`, borderRadius: 8, background: theme.panel,
+      }}>
+        <input
+          type="checkbox"
+          checked={vadSilence}
+          onChange={(event) => toggleVadSilence(event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{t('Remove silence (local VAD)')}</span>
+          <span style={{ fontSize: 11, color: theme.textDim, lineHeight: 1.45 }}>
+            {t('When enabled, the agent\'s silence removal uses the local Silero VAD to find speech and only cuts stretches confirmed as silent; when off, nothing is removed. The model ships with the app, so there is no download.')}
+          </span>
+        </span>
+      </label>
+      <div style={{ fontSize: 11.5, color: theme.textDim }}>
+        {t('Models download to this machine on demand and are not bundled with the app. Downloads are accelerated the first time a model is used or fetched.')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+        {loadError && <div style={{ fontSize: 11.5, color: theme.danger }}>{t('Could not read the model list: {err}', { err: loadError })}</div>}
+        {!loadError && !models && <div style={{ fontSize: 11.5, color: theme.textDim }}>{t('Reading…')}</div>}
+        {(models ?? []).map((m) => {
+          const row = localAsrModelRowState(m, engine);
+          const status = statusLabel(m, row);
+          const downloading = m.task?.status === 'downloading';
+          const busy = busyId === m.id;
+          return (
+            <div key={m.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 10px', borderRadius: 8,
+              border: `0.5px solid ${theme.border}`, background: theme.panel,
+            }}>
+              <VendorIcon vendor="openai" size={18} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{m.label}</div>
+                <div style={{ fontSize: 11, color: theme.textDim }}>
+                  {m.language}{m.sizeLabel ? ` · ${m.sizeLabel}` : ''}{modelSizeText(m.bytes)}
+                </div>
+              </div>
+              <span style={{ fontSize: 11, color: status.color, whiteSpace: 'nowrap' }}>{status.text}</span>
+              {downloading ? (
+                <span style={{ fontSize: 11, color: theme.textDim }}>…</span>
+              ) : (
+                <>
+                  {row.canDownload && (
+                    <button type="button" disabled={busy} onClick={() => void startDownload(m.id)}
+                      title={row.ready ? t('The desktop engine is ready; add the browser engine files so inference can fall back when desktop inference fails') : undefined}
+                      style={row.ready ? smallBtn : { ...smallBtn, ...primaryBtn }}>
+                      {row.ready ? t('Complete') : t('Download')}
+                    </button>
+                  )}
+                  {row.ready && (
+                    <button type="button" disabled={busy} onClick={() => void deleteModel(m.id)}
+                      style={smallBtn}>{t('Delete')}</button>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const smallBtn: React.CSSProperties = {
+  fontSize: 11.5, padding: '3px 10px', borderRadius: 6,
+  border: `0.5px solid ${theme.border}`, background: 'transparent',
+  color: theme.text, cursor: 'pointer', whiteSpace: 'nowrap',
+};
+const primaryBtn: React.CSSProperties = {
+  borderColor: theme.accent, color: theme.accent,
+};

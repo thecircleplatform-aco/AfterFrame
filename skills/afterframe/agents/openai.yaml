@@ -1,0 +1,18 @@
+interface:
+  display_name: "AfterFrame"
+  short_description: "Connect and edit local AfterFrame video projects"
+  brand_color: "#7C3AED"
+  icon_small: "./assets/afterframe-icon.png"
+  icon_large: "./assets/afterframe-icon.png"
+  default_prompt: "Use $afterframe to connect to AfterFrame and inspect the selected video project."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "afterframe"
+      description: "AfterFrame local editor MCP server"
+      transport: "streamable_http"
+      url: "http://localhost:5199/api/external-mcp/mcp"
+
+policy:
+  allow_implicit_invocation: true

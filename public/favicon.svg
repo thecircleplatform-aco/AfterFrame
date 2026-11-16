@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124 100" role="img" aria-label="AF">
+  <defs>
+    <linearGradient id="af-brand" x1="0" y1="0" x2="124" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ec4899" />
+      <stop offset="0.5" stop-color="#9333ea" />
+      <stop offset="1" stop-color="#3b82f6" />
+    </linearGradient>
+  </defs>
+  <g fill="url(#af-brand)">
+    <path d="M0 100 26 0h13L13 100Z" />
+    <path d="M39 0h7l26 100h-8Z" />
+    <path d="M15 66h44v12H18Z" />
+    <path d="M76 0h48v20H76Z" />
+    <path d="M76 0h20v100H76Z" />
+    <path d="M76 46h42v18H76Z" />
+  </g>
+</svg>

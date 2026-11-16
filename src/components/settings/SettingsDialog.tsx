@@ -1,0 +1,667 @@
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { theme } from '../../theme';
+import { t, useT } from '../../i18n/locale';
+import { Icon } from '../../modules/icons';
+import { VendorIcon } from './vendorIcons';
+import { applyLiveCaps, applyLiveKeyStatus, applyLiveModels } from '../../agent/capabilities';
+import { applyAgentModelStatus } from '../../agent/model-selection';
+import {
+  TRANSCRIPTION_DIARIZATION_KEY,
+  TRANSCRIPTION_LANGUAGE_KEY,
+  setPreferredTranscriptionProvider,
+} from '../../transcript/provider';
+import { isTranscriptionProviderId } from '../../transcript/types';
+import { isAsrModelTier } from '../../../shared/asr-models';
+import { setAutoTranscribeIngest } from '../../transcript/provider';
+import { FieldRow, ON, VendorPane, WARN, type FieldCtx } from './settingsVendorPane';
+import { useCodexSettings } from './useCodexSettings';
+import { useClaudeCodeSettings } from './useClaudeCodeSettings';
+import type { CodexAgentStatus } from '../../../shared/codex-agent';
+import type { CopilotAgentStatus } from '../../../shared/copilot-agent';
+import type { ClaudeCodeAgentStatus } from '../../../shared/claude-code-agent';
+import { useCopilotSettings } from './useCopilotSettings';
+import { stageFieldValue } from './codexReasoning';
+import { SettingsVersionControl } from './SettingsVersionControl';
+import {
+  CURRENT_APP_VERSION,
+  formatDisplayVersion,
+  getUpstreamUpdateState,
+  hasDesktopUpdateSupport,
+  subscribeUpstreamUpdate,
+} from '../../ui/upstreamUpdate';
+import {
+  resolveUpstreamUpdateAction,
+  runUpstreamUpdateCommand,
+} from '../../ui/upstreamUpdateAction';
+import {
+  SETTINGS_CATEGORIES, buildPatch, categoryGroupStats, findGroup, groupConfigured,
+  modelValue, omitKey, savedMessage, vendorConfigured,
+  type KeyStatusResponse, type SettingsCategory, type SettingsField, type SettingsGroup,
+  type SettingsVendorPage, type StagedValues as Values,
+} from './settingsSchema';
+import {
+  COMPACT_BREAKPOINT, advPanel, bodyRowStyle, btnGhost, btnPrimary, catRow, chevronBox, dot,
+  footMsg, footStyle, footToggle, headBar, headIconBtn, headStyle, licenseLink, navLabel, navRowStyle, overlayStyle,
+  paneCapsule, paneTag, panelStyle, revealLabel, routeBox, searchCapsule, searchClear, searchInput, sidebarStyle, treeScroll, vendorColStyle,
+} from './SettingsDialog.styles';
+
+// Global settings modal, three columns: left = "Classification → Capability" two-level collapsible tree (capability row = status indicator + name);
+// Center = list of providers under the current capability (generating four capabilities with a "default provider" route select at the top);
+// Right = Select the provider's configuration page (header = icon + name + configuration status, body = fields).
+// The key value only flows to the dev server via POST /api/keys (stored in memory + .env.local, already gitignore),
+// Server-side injection; GET only returns Boolean for secret, never backfills. The model/routing field is a non-secret configuration and the current value is
+// Echoed through GET's models channel.
+// values semantics: field name appearing in values = temporary changes; '' = explicit temporary clearing (sent when saving,
+// The backend treats the empty string as deleting the key and deletes the row from .env.local, which means "return to default" for the model field). Temporary baseline:
+// Model field = current value on the server, the rest = '' (the echoed value is not temporarily stored, only the actual changes are entered into the values);
+// values are shared globally by field name and the switching tree nodes are not cleared (MINIMAX_* instant synchronization across capability pages).
+// The right column (vendor configuration page + field rendering + test connection) is in settingsVendorPane.tsx.
+const CLOSE_CONFIRM_MS = 2000;
+
+// ── hooks ─────────────────────────────────────────────────────────────────
+
+function useKeyStatus(): {
+  status: KeyStatusResponse | null;
+  setStatus: (s: KeyStatusResponse) => void;
+  loadError: string | null;
+} {
+  const [status, setStatus] = useState<KeyStatusResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/keys')
+      .then((r) => r.json() as Promise<KeyStatusResponse>)
+      .then((d) => { if (alive) setStatus(d); })
+      .catch(() => { if (alive) setLoadError(t('Could not load config (dev server not ready?)')); });
+    return () => { alive = false; };
+  }, []);
+  return { status, setStatus, loadError };
+}
+
+/** Keep runtime transcription preferences in sync with server-saved settings. */
+function syncTranscriptionPreferences(models: Record<string, string>): void {
+  try {
+    localStorage.setItem(TRANSCRIPTION_LANGUAGE_KEY, models.TRANSCRIPTION_LANGUAGE?.trim() || 'zh');
+    localStorage.setItem(
+      TRANSCRIPTION_DIARIZATION_KEY,
+      models.TRANSCRIPTION_DIARIZATION === '0' ? '0' : '1',
+    );
+  } catch {
+    // Best-effort; runtime language and diarization defaults remain in effect.
+  }
+  const provider = models.PREFERRED_TRANSCRIPTION_PROVIDER;
+  setPreferredTranscriptionProvider(isTranscriptionProviderId(provider) ? provider : 'assemblyai');
+  const ingest = models.AUTO_TRANSCRIBE_INGEST;
+  if (ingest === 'off' || ingest === 'local' || ingest === 'all') setAutoTranscribeIngest(ingest);
+}
+
+/** Keep the runtime ASR model tier in sync with the saved setting ('' → auto). */
+function syncLocalAsrModel(saved: string | undefined): void {
+  try {
+    // Validate against the catalog, never a hand-written list: a tier missing
+    // here is discarded silently and the previous selection stays in force.
+    if (isAsrModelTier(saved ?? '')) localStorage.setItem('cc.asrModel', saved ?? '');
+  } catch {
+    // Best-effort; the auto tier stays in effect.
+  }
+}
+
+function useSaveKeys(values: Values, onSaved: (next: KeyStatusResponse) => void): {
+  save: () => Promise<void>; saving: boolean; msg: string | null; error: string | null;
+} {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (): Promise<void> => {
+    const patch = buildPatch(values);
+    if (Object.keys(patch).length === 0) { setMsg(t('No changes')); return; }
+    setSaving(true); setError(null); setMsg(null);
+    try {
+      const res = await fetch('/api/keys', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      });
+      const body = await res.json().catch(() => ({})) as Partial<KeyStatusResponse> & { error?: string };
+      if (!res.ok) throw new Error(body.error || t('Save failed ({n})', { n: res.status }));
+      onSaved(body as KeyStatusResponse);
+      // A storage-folder change is copied immediately but only used on the next
+      // launch, so saying "saved" alone would look like nothing happened.
+      setMsg(body.restartRequired ? t('Saved · the new project storage folder takes effect after a restart') : savedMessage());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return { save, saving, msg, error };
+}
+
+/** Anti-accidental closing: When there are unsaved changes, Mask/Esc will only warn you for the first time, and it will be truly closed when triggered again within 2 seconds. */
+function useCloseGuard(dirty: boolean, onClose: () => void): { requestClose: () => void; warn: string | null } {
+  const [warn, setWarn] = useState<string | null>(null);
+  const armedAt = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const requestClose = (): void => {
+    if (!dirty || Date.now() - armedAt.current < CLOSE_CONFIRM_MS) { onClose(); return; }
+    armedAt.current = Date.now();
+    setWarn(t('Unsaved changes — close again to discard them'));
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { setWarn(null); armedAt.current = 0; }, CLOSE_CONFIRM_MS);
+  };
+  return { requestClose, warn };
+}
+
+function useEscape(handler: () => void): void {
+  const ref = useRef(handler);
+  useEffect(() => { ref.current = handler; });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') ref.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+}
+
+function useHover(): [boolean, { onMouseEnter: () => void; onMouseLeave: () => void }] {
+  const [hovered, setHovered] = useState(false);
+  return [hovered, { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) }];
+}
+
+/**
+ * Narrow window? The dialog then shows one pane at a time instead of three
+ * fixed-width columns, which is the only way the content column stays readable
+ * on a phone or a half-width desktop window.
+ */
+function useCompactViewport(): boolean {
+  const query = `(max-width: ${COMPACT_BREAKPOINT - 1}px)`;
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
+/** The left tree capability is selected + the middle column provider is selected; when changing capabilities, the middle column is reset to the first provider with the capability. */
+function useTreeSelection(initialVendor?: string): {
+  group: SettingsGroup; page: SettingsVendorPage;
+  selectGroup: (key: string) => void; selectVendor: (key: string) => void;
+  openPage: (vendorKey: string) => void;
+} {
+  const seeded = seedSelection(initialVendor);
+  const [groupKey, setGroupKey] = useState<string>(seeded.group.key);
+  const [vendorKey, setVendorKey] = useState<string>(seeded.vendor.key);
+  const group = findGroup(groupKey);
+  const page = group.vendors.find((v) => v.key === vendorKey) ?? group.vendors[0];
+  const selectGroup = (key: string): void => {
+    const nextGroup = findGroup(key);
+    setGroupKey(key);
+    setVendorKey(nextGroup.vendors[0].key);
+  };
+  // Jump to a page in any group, resolved the same way as initialVendor.
+  const openPage = (vendorKey: string): void => {
+    const target = seedSelection(vendorKey);
+    setGroupKey(target.group.key);
+    setVendorKey(target.vendor.key);
+  };
+  return { group, page, selectGroup, selectVendor: setVendorKey, openPage };
+}
+
+/** Open on a specific vendor page when the caller routed here (e.g. the chat's missing-model-pack button). */
+function seedSelection(initialVendor?: string): { group: SettingsGroup; vendor: SettingsVendorPage } {
+  for (const category of SETTINGS_CATEGORIES) {
+    for (const group of category.groups) {
+      const vendor = group.vendors.find((v) => v.key === initialVendor);
+      if (vendor) return { group, vendor };
+    }
+  }
+  const first = SETTINGS_CATEGORIES[0].groups[0];
+  return { group: first, vendor: first.vendors[0] };
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+
+/** After successful saving, let the agent side immediately perceive: caps / key Boolean / model routing / LLM interface and model. */
+function applySavedToAgent(next: KeyStatusResponse): void {
+  applyLiveCaps(next.caps);
+  applyLiveKeyStatus(next.keys);
+  if (next.models) applyLiveModels(next.models);
+  if (next.models) applyAgentModelStatus(next.keys, next.models);
+}
+
+
+function useFieldContext(
+  status: KeyStatusResponse | null,
+  values: Values,
+  setValues: React.Dispatch<React.SetStateAction<Values>>,
+  reveal: boolean,
+  refreshStatus: () => Promise<void>,
+  copilotEnabled: boolean,
+  openPage: (route: string) => void,
+): FieldCtx {
+  const [modelOptions, setModelOptions] = useState<Record<string, readonly string[]>>({});
+  const [autoClearedEffort, setAutoClearedEffort] = useState<string | null>(null);
+  const codex = useCodexSettings(
+    modelValue(status, 'CODEX_MODEL'),
+    modelValue(status, 'CODEX_REASONING_EFFORT'),
+  );
+  const copilot = useCopilotSettings(copilotEnabled);
+  const claudeCode = useClaudeCodeSettings(modelValue(status, 'CLAUDE_CODE_MODEL'));
+  const onStage = (field: SettingsField, raw: string): void => {
+    const staged = stageFieldValue(values, field, raw, status, codex.models, autoClearedEffort);
+    setValues(staged.values);
+    setAutoClearedEffort(staged.autoClearedEffort);
+  };
+  useEffect(() => {
+    if (!('CODEX_MODEL' in values) && !('CODEX_REASONING_EFFORT' in values)) {
+      setAutoClearedEffort(null);
+    }
+  }, [values]);
+  const onToggleClear = (field: SettingsField): void => {
+    if (field.name === 'CODEX_MODEL' || field.name === 'CLAUDE_CODE_MODEL') {
+      onStage(field, values[field.name] === '' ? modelValue(status, field.name) : '');
+      return;
+    }
+    setValues((previous) => previous[field.name] === ''
+      ? omitKey(previous, field.name)
+      : { ...previous, [field.name]: '' });
+  };
+  return {
+    status, values, reveal, onStage, onToggleClear, modelOptions, codex, copilot, claudeCode,
+    refreshStatus, openPage,
+    onModelsDiscovered: (name, models) => {
+      setModelOptions((previous) => ({ ...previous, [name]: [...new Set(models)] }));
+    },
+  };
+}
+
+export function SettingsDialog({ onClose, initialVendor }: { onClose: () => void; initialVendor?: string }) {
+  const t = useT();
+  const updateState = useSyncExternalStore(
+    subscribeUpstreamUpdate,
+    getUpstreamUpdateState,
+    getUpstreamUpdateState,
+  );
+  const { status, setStatus, loadError } = useKeyStatus();
+  const [values, setValues] = useState<Values>({});
+  const { group, page, selectGroup, selectVendor, openPage } = useTreeSelection(initialVendor);
+  const compact = useCompactViewport();
+  // Compact shows one column at a time (drill-down). Wide shows all three.
+  const [pane, setPane] = useState<'tree' | 'vendors' | 'page'>(initialVendor ? 'page' : 'tree');
+  const pickGroup = (key: string): void => { selectGroup(key); if (compact) setPane('vendors'); };
+  const pickVendor = (key: string): void => { selectVendor(key); if (compact) setPane('page'); };
+  const [reveal, setReveal] = useState(false);
+  // Search filters the tree (and the provider list) by name as you type.
+  const [query, setQuery] = useState('');
+  const refreshStatus = async (): Promise<void> => {
+    try {
+      const response = await fetch('/api/keys');
+      const next = (await response.json()) as KeyStatusResponse;
+      setStatus(next);
+      applySavedToAgent(next);
+    } catch {
+      // Keep the stale snapshot; the next save or dialog open refreshes it.
+    }
+  };
+  const ctx = useFieldContext(status, values, setValues, reveal, refreshStatus,
+    page.connection === 'copilot', openPage);
+  useEffect(() => {
+    if (!status?.models) return;
+    syncTranscriptionPreferences(status.models);
+    syncLocalAsrModel(status.models.LOCAL_ASR_MODEL);
+  }, [status]);
+  const { save, saving, msg, error } = useSaveKeys(values, (next) => {
+    setStatus(next);
+    // Desktop: the main process owns the zoom factor; re-apply after the
+    // saved UI_SCALE changed so the change is visible immediately.
+    void window.AfterFrameDesktop?.windowAction('apply-ui-scale');
+    applySavedToAgent(next);
+    // The status effect synchronizes all transcription runtime preferences.
+    setValues({});
+  });
+  const dirty = Object.keys(values).length > 0;
+  const { requestClose, warn } = useCloseGuard(dirty, onClose);
+  useEscape(requestClose);
+
+  const updateAction = resolveUpstreamUpdateAction(updateState, hasDesktopUpdateSupport());
+
+  const codexStatus = ctx.codex.status;
+  const copilotStatus = ctx.copilot.status;
+  const claudeCodeStatus = ctx.claudeCode.status;
+
+  const shownError = error ?? loadError;
+  const message = shownError ? { text: shownError, color: WARN }
+    : warn ? { text: warn, color: theme.gold }
+      : msg ? { text: msg, color: ON } : null;
+
+  // Name of the category that owns the active capability — the compact back
+  // capsule returns to the tree, so it is labelled with where it lands.
+  const activeCategoryTitle =
+    SETTINGS_CATEGORIES.find((c) => c.groups.some((g) => g.key === group.key))?.title ?? group.title;
+  // One bar at the top: in compact the header itself becomes the back control,
+  // rather than a second "back to …" strip stacked under it.
+  const drilled = compact && pane !== 'tree';
+  const backLabel = drilled
+    ? t('Back to {title}', { title: t(pane === 'vendors' ? activeCategoryTitle : group.title) })
+    : null;
+  const paneLabel = drilled ? t(pane === 'vendors' ? group.title : page.title) : null;
+  // Connection state for the header capsule: green + glow when the drilled-in
+  // provider is configured, red when it is not. Only meaningful on a vendor page.
+  const paneConnected = drilled && pane === 'page'
+    ? vendorConfigured(status, page, codexStatus, copilotStatus, claudeCodeStatus)
+    : null;
+  // Deepest level: nothing to search, so the provider capsule owns that slot.
+  const searchingPane = compact && pane === 'page';
+
+  return (
+    <div style={overlayStyle(compact)} onMouseDown={requestClose}>
+      <div style={panelStyle(compact)} className="cc-settings-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <header style={headStyle(compact)}>
+          {/* One floating glass bar: back · search · close, over the panel. */}
+          <div style={headBar}>
+            <button
+              type="button"
+              onClick={() => {
+                if (drilled) setPane(pane === 'vendors' ? 'tree' : 'vendors');
+                else requestClose();
+              }}
+              style={headIconBtn}
+              title={backLabel ?? t('Back')}
+              aria-label={backLabel ?? t('Back')}
+            >
+              {/* The icon set has no left-chevron; rotate the down one. */}
+              <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}>
+                <Icon name="chevronDown" size={16} />
+              </span>
+            </button>
+            {/* The search field only makes sense where there is a list to filter;
+                on a provider page its slot carries the provider's own capsule. */}
+            {searchingPane ? (
+              <span className="cc-pane-tag" style={paneCapsule}
+                data-state={paneConnected ? 'on' : 'off'}
+                title={t(paneConnected ? 'Connected' : 'Not connected')}>
+                <VendorIcon vendor={page.vendor} size={14} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {paneLabel}
+                </span>
+                <span className="cc-pane-tag-dot" data-on={paneConnected ? 'true' : 'false'}
+                  style={{ background: paneConnected ? theme.success : theme.danger }} />
+              </span>
+            ) : (
+              <div style={searchCapsule}>
+                <Icon name="search" size={14} />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('Search settings')}
+                  aria-label={t('Search settings')}
+                  style={searchInput}
+                />
+                {query !== '' && (
+                  <button type="button" onClick={() => setQuery('')} style={searchClear}
+                    title={t('Clear')} aria-label={t('Clear')}>
+                    <Icon name="x" size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+            <button type="button" onClick={requestClose} title={t('Close')} style={headIconBtn}>
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+          {/* Wide only: the compact bar already carries the provider capsule, so a
+              second row would just repeat it. */}
+          {!compact && (
+            <div style={{
+              width: '100%', minWidth: 0, display: 'flex', alignItems: 'center',
+              justifyContent: 'flex-end', gap: 8,
+            }}>
+              {paneLabel && (
+                <span style={paneTag} className="cc-pane-tag"
+                  data-state={paneConnected === null ? undefined : paneConnected ? 'on' : 'off'}
+                  title={paneConnected === null ? undefined : t(paneConnected ? 'Connected' : 'Not connected')}>
+                  {paneConnected !== null && (
+                    <VendorIcon vendor={page.vendor} size={14} />
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {paneLabel}
+                  </span>
+                  {paneConnected !== null && (
+                    <span className="cc-pane-tag-dot" data-on={paneConnected ? 'true' : 'false'}
+                      style={{ background: paneConnected ? theme.success : theme.danger }} />
+                  )}
+                </span>
+              )}
+              {/* The version row is nowrap internally, so it must be allowed to be
+                  clipped rather than push the close button out of the header. In
+                  compact there is no room for it — the pane name matters more, and
+                  the app version is still on the tree's own footer. */}
+              {!compact && (
+                <div style={{ minWidth: 0, overflow: 'hidden', display: 'flex' }}>
+                  <SettingsVersionControl
+                    versionLabel={t('Current version: {version}', { version: formatDisplayVersion(CURRENT_APP_VERSION) })}
+                    actionLabel={updateAction.label}
+                    disabled={updateAction.disabled}
+                    onAction={() => { runUpstreamUpdateCommand(updateAction.command); }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </header>
+        <div style={bodyRowStyle(compact)}>
+          {(!compact || pane === 'tree') && (
+            <CapabilityTree status={status} codexStatus={codexStatus} copilotStatus={copilotStatus}
+              claudeCodeStatus={claudeCodeStatus} compact={compact} query={query}
+              activeGroup={group.key} onSelect={pickGroup} />
+          )}
+          {(!compact || pane === 'vendors') && (
+            <VendorList group={group} activeVendor={page.key} onSelectVendor={pickVendor}
+              ctx={ctx} compact={compact} query={query} />
+          )}
+          {(!compact || pane === 'page') && (
+            <VendorPane page={page} hint={group.hint ?? ''} ctx={ctx} />
+          )}
+        </div>
+        <FooterBar reveal={reveal} onReveal={setReveal} message={message} compact={compact}
+          dirty={dirty} saving={saving} onClose={requestClose} onSave={() => { void save(); }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Left column (categories can be folded → capabilities can be selected) ──
+
+function CapabilityTree({
+  status, codexStatus, copilotStatus, claudeCodeStatus, activeGroup, onSelect, compact, query,
+}: {
+  status: KeyStatusResponse | null; codexStatus: CodexAgentStatus | null;
+  copilotStatus: CopilotAgentStatus | null;
+  claudeCodeStatus: ClaudeCodeAgentStatus | null;
+  activeGroup: string; onSelect: (key: string) => void; compact: boolean; query: string;
+}) {
+  const t = useT();
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (key: string): void =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  const needle = query.trim().toLowerCase();
+  // While searching, only matching capabilities survive and every category that
+  // still has one is force-opened, so results are never hidden behind a fold.
+  // A capability matches on its own name or on any provider name it lists, so
+  // typing "claude" reaches the capability even when the label differs.
+  const results = SETTINGS_CATEGORIES.map((category) => {
+    const matches = needle === ''
+      ? category.groups
+      : category.groups.filter((g) => t(g.title).toLowerCase().includes(needle)
+        || g.vendors.some((p) => t(p.title).toLowerCase().includes(needle)));
+    return { category, groups: matches };
+  }).filter((x) => needle === '' || x.groups.length > 0);
+  return (
+    <nav style={sidebarStyle(compact)}>
+      <div style={treeScroll}>
+        {results.map(({ category, groups }) => (
+          <TreeCategory key={category.key} category={category} groups={groups}
+            status={status} codexStatus={codexStatus}
+            copilotStatus={copilotStatus} claudeCodeStatus={claudeCodeStatus}
+            open={needle === '' ? !collapsed.has(category.key) : true} activeGroup={activeGroup}
+            onToggle={() => toggle(category.key)} onSelect={onSelect} />
+        ))}
+        {results.length === 0 && (
+          <p style={{ margin: 0, padding: '10px 12px', fontSize: 11.5, color: theme.textDim }}>
+            {t('No matching settings')}
+          </p>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+interface TreeCategoryProps {
+  category: SettingsCategory; groups: readonly SettingsGroup[];
+  status: KeyStatusResponse | null; codexStatus: CodexAgentStatus | null;
+  copilotStatus: CopilotAgentStatus | null;
+  claudeCodeStatus: ClaudeCodeAgentStatus | null;
+  open: boolean; activeGroup: string; onToggle: () => void; onSelect: (key: string) => void;
+}
+
+function TreeCategory({
+  category, groups, status, codexStatus, copilotStatus, claudeCodeStatus, open, activeGroup, onToggle, onSelect,
+}: TreeCategoryProps) {
+  const t = useT();
+  const { done, total } = categoryGroupStats(status, category, codexStatus, copilotStatus, claudeCodeStatus);
+  return (
+    <div>
+      <button type="button" onClick={onToggle} title={open ? t('Collapse') : t('Expand')} style={catRow}>
+        <span style={{ ...chevronBox, transform: open ? 'none' : 'rotate(-90deg)' }}>
+          <Icon name="chevronDown" size={12} />
+        </span>
+        <Icon name={category.icon} size={13} />
+        <span style={navLabel}>{t(category.title)}</span>
+        <span style={{ fontSize: 10, fontWeight: 400, color: done === total && total > 0 ? ON : theme.textDim }}>
+          {done}/{total}
+        </span>
+      </button>
+      {open && groups.map((g) => (
+        <GroupRow key={g.key} title={g.title}
+          on={groupConfigured(status, g, codexStatus, copilotStatus, claudeCodeStatus)}
+          active={g.key === activeGroup} onSelect={() => onSelect(g.key)} />
+      ))}
+    </div>
+  );
+}
+
+function GroupRow({ title, on, active, onSelect }: {
+  title: string; on: boolean; active: boolean; onSelect: () => void;
+}) {
+  const t = useT();
+  const [hovered, hoverProps] = useHover();
+  return (
+    <button type="button" onClick={onSelect} {...hoverProps}
+      style={{ ...navRowStyle(active, hovered), paddingLeft: 19 }}>
+      <span style={dot(on)} />
+      <span style={navLabel}>{t(title)}</span>
+    </button>
+  );
+}
+
+// ── Middle column (route select + provider list) ────────────────────────────────────────
+
+function VendorList({ group, activeVendor, onSelectVendor, ctx, compact, query }: {
+  group: SettingsGroup; activeVendor: string; onSelectVendor: (key: string) => void; ctx: FieldCtx;
+  compact: boolean; query: string;
+}) {
+  const t = useT();
+  const needle = query.trim().toLowerCase();
+  const vendors = needle === ''
+    ? group.vendors
+    : group.vendors.filter((p) => t(p.title).toLowerCase().includes(needle));
+  return (
+    <div style={vendorColStyle(compact)}>
+      {group.route && <div style={routeBox}><FieldRow field={group.route} ctx={ctx} /></div>}
+      {vendors.map((p) => (
+        <VendorRow key={p.key} page={p}
+          on={vendorConfigured(ctx.status, p, ctx.codex.status, ctx.copilot.status, ctx.claudeCode.status)}
+          active={p.key === activeVendor} onSelect={() => onSelectVendor(p.key)} />
+      ))}
+      {vendors.length === 0 && (
+        <p style={{ margin: 0, padding: '10px 12px', fontSize: 11.5, color: theme.textDim }}>
+          {t('No matching providers')}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function VendorRow({ page, on, active, onSelect }: {
+  page: SettingsVendorPage; on: boolean; active: boolean; onSelect: () => void;
+}) {
+  const t = useT();
+  const [hovered, hoverProps] = useHover();
+  return (
+    <button type="button" onClick={onSelect} {...hoverProps} style={navRowStyle(active, hovered)}>
+      {page.icon ? <Icon name={page.icon} size={15} /> : <VendorIcon vendor={page.vendor} size={15} />}
+      <span style={navLabel}>{t(page.title)}</span>
+      <span style={dot(on)} />
+    </button>
+  );
+}
+
+interface FooterBarProps {
+  reveal: boolean; onReveal: (v: boolean) => void; message: { text: string; color: string } | null;
+  dirty: boolean; saving: boolean; onClose: () => void; onSave: () => void; compact: boolean;
+}
+
+function FooterBar({ reveal, onReveal, message, dirty, saving, onClose, onSave, compact }: FooterBarProps) {
+  const t = useT();
+  // "Show values" and the licence link are only needed by power users, so they
+  // live behind a disclosure instead of cluttering the bar for everyone.
+  const [advanced, setAdvanced] = useState(false);
+  const disabled = saving || !dirty;
+  return (
+    <footer style={footStyle(compact)}>
+      <div style={{ position: 'relative', flex: '0 0 auto' }}>
+        {advanced && (
+          <div style={advPanel}>
+            <label style={revealLabel}>
+              <input type="checkbox" checked={reveal} onChange={(e) => onReveal(e.target.checked)} />
+              {t('Show values')}
+            </label>
+            <a href="/fonts/LICENSES.md" target="_blank" rel="noopener noreferrer" style={licenseLink}>
+              {t('Third-party font licenses')}
+            </a>
+          </div>
+        )}
+        <button type="button" onClick={() => setAdvanced((v) => !v)} style={footToggle}
+          aria-expanded={advanced} title={t(advanced ? 'Hide advanced options' : 'Show advanced options')}>
+          <span style={{ display: 'inline-flex', transform: advanced ? 'none' : 'rotate(180deg)' }}>
+            <Icon name="chevronDown" size={13} />
+          </span>
+        </button>
+      </div>
+      {/* Compact has no room for two rows of controls, so the status message takes
+          its own line above them instead of squeezing the buttons off the bar. */}
+      <div style={{
+        ...footMsg,
+        color: message?.color ?? ON,
+        ...(compact ? { flex: '1 1 100%', order: -1, textAlign: 'left' as const } : null),
+      }}>{message?.text ?? ''}</div>
+      <button type="button" onClick={onClose}
+        style={{ ...btnGhost, flex: compact ? '1 1 0%' : '0 0 auto', marginLeft: compact ? 0 : 'auto' }}>
+        {t('Close')}
+      </button>
+      <button type="button" onClick={onSave} disabled={disabled}
+        style={{
+          ...btnPrimary, flex: compact ? '1 1 0%' : '0 0 auto',
+          opacity: disabled ? 0.5 : 1, cursor: disabled ? 'default' : 'pointer',
+        }}>
+        {saving ? t('Saving…') : t('Save')}
+      </button>
+    </footer>
+  );
+}

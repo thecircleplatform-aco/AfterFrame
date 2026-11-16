@@ -1,0 +1,19 @@
+name = "afterframe-fetch"
+main = "src/index.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# The agent's web reader. No secret needed — it only fetches pages — but it is a
+# public endpoint on a proxy, so it is allow-listed to the app's own origins and
+# rate-limited per IP.
+#
+#   cd fetch-worker
+#   npx wrangler deploy
+#
+# Then point the app at it:  VITE_FETCH_URL=https://afterframe-fetch.<account>.workers.dev
+#
+# Optional:
+#   RATE_PER_MINUTE  (default 20, enforced in code)
+
+[vars]
+ALLOWED_ORIGINS = "https://afterframe.acocloud.app,http://localhost:5173,http://docs.localhost:5173"
