@@ -159,10 +159,19 @@ async function registerBridgeEditor(
     sendBridgeJson(res, 409, { error: 'project is already owned or its ownership record is invalid' });
     return;
   }
+  // Register against the claim's revision, NOT the browser-reported one.
+  //
+  // The claim is anchored to the revision the store actually holds; the
+  // browser's `baseRevision` is only a hint and is routinely stale (local-cache
+  // hydration, a raced autosave, a reconnect after another write). Passing the
+  // stale value here made the broker's ownership-claim validation reject the
+  // registration with a 400/409 even though the claim was valid — which kept
+  // the editor unregistered, so every save was refused and imports were lost on
+  // refresh. Keeping these two in lockstep is what makes registration recover.
   const issuedCapability = operations.registerEditor(
     input.projectId,
     input.editorId,
-    input.baseRevision,
+    claimed.claim.baseRevision,
     input.tools,
     claimed.claim,
     capability,

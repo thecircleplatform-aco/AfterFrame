@@ -66,9 +66,22 @@ export async function claimBrowserProjectOwnership(
   }
   return withSerializedProjectStore(async (store) => {
     const project = await storedProject(store, projectId);
-    if (!project || project.revision !== expectedRevision) {
-      return { status: 'stale', currentRevision: project?.revision };
-    }
+    // A missing project is genuinely stale: there is nothing to own.
+    if (!project) return { status: 'stale' };
+    // Do NOT require project.revision === expectedRevision.
+    //
+    // `expectedRevision` is the revision the browser last saw, and it drifts
+    // for entirely routine reasons: local IndexedDB hydration is newer than the
+    // shared store, an autosave raced the registration, or another window
+    // wrote. Rejecting registration for a revision mismatch stranded the
+    // editor permanently — it could not register, therefore could not write,
+    // therefore never caught up and never registered again. Every import piled
+    // up in memory and vanished on refresh.
+    //
+    // Registration is the ESTABLISHMENT of ownership, so it re-bases exactly
+    // like renewal does. The document write still performs its own revision
+    // and ownership-epoch checks, so a genuinely stale write is rejected on
+    // its merits instead of by refusing the editor a lease at all.
     const entry = await store.readEntry(projectEditOwnershipKey(projectId));
     const compatibility = ownershipCompatibility(entry, projectId);
     if (compatibility === 'blocked') return { status: 'blocked' };
@@ -101,9 +114,13 @@ export async function claimBrowserProjectOwnership(
       ownerKind: 'browser',
       ownerId,
       epoch: sameOwner ? current.epoch : (current?.epoch ?? 0) + 1,
-      baseRevision: expectedRevision,
+      // Base on what the STORE holds, not on the revision the browser remembers.
+      // Renewal and the write path must agree on where this editor is anchored,
+      // or a registering tab pins itself to a revision the server already
+      // replaced and every subsequent mutation is rejected.
+      baseRevision: project.revision,
     };
-    await store.writeEntry(projectEditOwnershipKey(projectId), renewedProjectEditOwnership(claim, expectedRevision));
+    await store.writeEntry(projectEditOwnershipKey(projectId), renewedProjectEditOwnership(claim, project.revision));
     return { status: 'claimed', claim };
   });
 }
@@ -150,7 +167,20 @@ export async function renewProjectEditOwnership(
       || current.epoch !== claim.epoch
       || current.leaseExpiresAt <= Date.now()) return { status: 'stale' };
     const project = await storedProject(store, claim.projectId);
-    if (!project || current.baseRevision !== project.revision) return { status: 'stale' };
+    if (!project) return { status: 'stale' };
+    // Do NOT require the stored revision to equal the claim's baseRevision.
+    //
+    // Requiring it created a permanent dead end: once another writer bumped the
+    // revision (another window, the agent, a restore, or a leftover claim from an
+    // earlier session), this editor could never renew again. It retried every
+    // ~1.5s forever, every save was rejected, and the UI reported a generic
+    // "failed to save" — so imports piled up in memory and vanished on refresh.
+    //
+    // Unlike claimBrowserProjectOwnership, renewal already proves continuity:
+    // the caller holds a matching ownerId, epoch and a live lease. Re-basing to
+    // the stored revision is therefore safe here, and the document write still
+    // has to pass the store's own revision check — a stale write is rejected on
+    // its merits rather than by stranding the editor.
     const renewed = { ...claim, baseRevision: project.revision };
     await store.writeEntry(
       projectEditOwnershipKey(claim.projectId),

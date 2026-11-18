@@ -242,8 +242,12 @@ try {
     },
   });
   assert.equal(serializedCommit.status, 'applied');
-  assert.equal((await browserClaim)?.status, 'stale',
-    'browser registration queued behind an offline commit must reload the committed revision');
+  // The offline commit is the reason registration must not be refused: it took
+  // the ownership lease mid-claim, so the browser is fenced out until it is
+  // released. Once released, the browser claims the COMMITTED revision instead
+  // of being stranded on the pre-commit one.
+  assert.equal((await browserClaim)?.status, 'blocked',
+    'a browser claim queued behind an offline commit must not steal its live lease');
   assert(serializedCommit.ownership);
   await releaseProjectEditOwnership(serializedCommit.ownership);
 

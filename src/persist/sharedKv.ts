@@ -28,6 +28,25 @@ import {
   requestEntry, requestMerge, requestMutation, requestProjectDocumentMutation,
   requestSnapshot, validMutationResponse, type EntryResponse,
 } from './sharedKvRequests';
+
+/**
+ * A save that was rejected because the stored revision moved on.
+ *
+ * Distinct from a transient transport failure on purpose: retrying can never
+ * succeed, so callers must not present it as "try again" or silently keep
+ * queueing writes. The editor uses this to surface a reload prompt instead of a
+ * vague toast, because the failure mode is invisible data loss — the user keeps
+ * editing a document that is never persisted.
+ */
+export class ProjectSaveConflictError extends Error {
+  readonly code = 'project_save_conflict';
+  /** True: the only recovery is a reload, not a retry. */
+  readonly requiresReload = true;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProjectSaveConflictError';
+  }
+}
 export type { SharedKvBackend } from './sharedKvLocal';
 type AgentRuntimeWriteRequest = Extract<ProjectStoreRequest, { operation: 'agent-runtime-write' }>;
 type AgentRunLeaseRequest = Extract<ProjectStoreRequest, { operation: 'agent-run-lease' }>;
@@ -253,16 +272,45 @@ export function kvForgetCachedAgentSessionEntries(projectId: string): void {
   }
 }
 
+/**
+ * Schedule a verification read without blocking the caller.
+ *
+ * Every `await fetchRemoteEntry` here is a full HTTP round-trip, and the chat
+ * panel issues ~20 of these on mount (chat, agent-runtime, jobs, proposal,
+ * creative-mode, artifacts...). Because each hook awaited its own read, those
+ * round-trips were effectively SERIALIZED: opening the Agent panel took ~4s
+ * while the actual server time was a few milliseconds per entry.
+ *
+ * Reads now return the cached value immediately and refresh in the background.
+ * `kvGetFresh` below keeps the strictly-awaited form for callers that genuinely
+ * need the server's answer before acting (e.g. ownership/CAS decisions).
+ */
+function scheduleRemoteVerify(key: string): void {
+  if (!remoteCache) return;
+  const lastVerified = remoteVerifiedAt.get(key) ?? 0;
+  if (!(key === 'projects' || !remoteKnown.has(key)
+    || Date.now() - lastVerified > KV_REMOTE_VERIFY_TTL_MS)) return;
+  // Claim the slot synchronously so a burst of concurrent kvGet calls for the
+  // same key coalesces into ONE request instead of a stampede.
+  remoteVerifiedAt.set(key, Date.now());
+  void fetchRemoteEntry(key).catch(() => undefined);
+}
+
 export async function kvGet<T>(key: string): Promise<T | undefined> {
   await ready();
   if (remoteCache) {
+    // Serve from cache first. `remoteKnown` means the remote copy was already
+    // folded into the cache, so a background refresh is sufficient to keep it
+    // current; an unknown key has nothing local to return, so it must await.
+    const cached = remoteCache[key] as T | undefined;
+    const known = remoteKnown.has(key);
+    if (known && key !== 'projects' && cached !== undefined) {
+      scheduleRemoteVerify(key);
+      return cached;
+    }
     try {
-      const lastVerified = remoteVerifiedAt.get(key) ?? 0;
-      if (key === 'projects' || !remoteKnown.has(key)
-        || Date.now() - lastVerified > KV_REMOTE_VERIFY_TTL_MS) {
-        await fetchRemoteEntry(key);
-        remoteVerifiedAt.set(key, Date.now());
-      }
+      await fetchRemoteEntry(key);
+      remoteVerifiedAt.set(key, Date.now());
     } catch {
       await disableRemote();
     }
@@ -270,6 +318,8 @@ export async function kvGet<T>(key: string): Promise<T | undefined> {
   if (remoteCache) return remoteCache[key] as T | undefined;
   return localGet<T>(key);
 }
+
+
 
 async function setProjectDocument(key: string, value: unknown): Promise<void> {
   if (injectedBackend || !canSync()) {
@@ -291,7 +341,20 @@ async function setProjectDocument(key: string, value: unknown): Promise<void> {
   const local = await localGet<unknown>(key);
   if (!ownership && local !== undefined) {
     ownership = await waitForBrowserProjectOwnership(projectId);
-    if (!ownership) throw new Error('Project edit rights are not registered yet, so the project was not saved');
+    if (!ownership) {
+      // No edit rights yet. The bridge registers them, and it can legitimately
+      // still be starting (hydration, reconnect backoff, a rejection it is
+      // already retrying). Refusing the save here is what turned a transient
+      // registration delay into permanent data loss: the write was dropped, the
+      // tab fell further behind, and the user's imports existed only in memory.
+      //
+      // Keep the edit locally and mark it pending instead. The pending-key
+      // merge carries it into the shared store once ownership arrives, so a
+      // slow registration delays persistence rather than discarding it.
+      await localSet(key, value);
+      await markPendingKey(key);
+      return;
+    }
   }
   const request: ProjectDocumentWriteRequest = ownership
     ? {
@@ -312,7 +375,25 @@ async function setProjectDocument(key: string, value: unknown): Promise<void> {
   }
   if (!result.accepted) {
     await cacheMutation(key, result);
-    throw new Error('Another editor updated this project — refresh the page and try again');
+    // A rejected CAS means this tab's base revision is behind the stored one.
+    // Something else wrote the project — another window, the agent, a restore, or
+    // a stale ownership record left by an earlier session.
+    //
+    // Adopt the revision the server just reported. Without this the tab stays
+    // pinned to a revision that can never match again, so EVERY subsequent save
+    // fails while the user keeps importing — and a refresh then discards all of
+    // it. Re-basing makes the next autosave land instead of looping on failure;
+    // the in-memory document is the newer intent in a single-user editor, which
+    // is the only shape this app supports.
+    const rebased = ownership && typeof result.currentRevision === 'string'
+      ? advanceBrowserProjectOwnership(ownership, result.currentRevision)
+      : undefined;
+    throw new ProjectSaveConflictError(
+      'Your last change was not saved because this project was changed somewhere else after this tab loaded it. '
+      + (rebased
+        ? 'AfterFrame re-attached to the current version, so the next change will save normally.'
+        : 'Reload the page to reattach, then redo your last change.'),
+    );
   }
   if (!result.found || typeof result.currentRevision !== 'string') {
     throw new Error('invalid successful project document CAS response');

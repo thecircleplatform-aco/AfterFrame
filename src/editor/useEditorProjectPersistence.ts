@@ -3,6 +3,7 @@ import type { PlayerRef } from '@remotion/player';
 import { enqueueVisualAnalysis } from '../agent/progress/visual-analysis-jobs';
 import { useT } from '../i18n/locale';
 import { pendingAutosaveAfterObservation, recoverFailedAutosave } from '../persist/autosaveRecovery';
+import { ProjectSaveConflictError } from '../persist/sharedKv';
 import { acknowledgeIngestedGenerationResults, resumeOpenGenerationJobs } from '../persist/jobRegistryStore';
 import {
   flushProjectSaves,
@@ -44,7 +45,19 @@ function usePendingSaveQueue(): {
   const observeSave = useCallback((result: ProjectSaveResult): void => {
     if (result.status === 'failed') {
       if (!saveFailureShownRef.current) {
-        showAppToast(t('Failed to save project. Please retry; the project will not close or switch until saving succeeds.'), { error: true });
+        // A conflict is not a transient failure: retrying is guaranteed to fail
+        // again, so telling the user to "retry" hides real data loss. Show the
+        // cause the store reported and make the only working recovery explicit.
+        const cause = result.error instanceof Error ? result.error.message : '';
+        const conflict = result.error instanceof ProjectSaveConflictError
+          || (result.error as { requiresReload?: unknown } | undefined)?.requiresReload === true;
+        showAppToast(
+          conflict
+            ? t('Not saved — this project changed elsewhere. Reload the page to reconnect, then repeat your change.')
+            : t('Failed to save project. Please retry; the project will not close or switch until saving succeeds.')
+              + (cause ? ` (${cause})` : ''),
+          { error: true },
+        );
         saveFailureShownRef.current = true;
       }
       return;
