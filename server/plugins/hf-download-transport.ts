@@ -67,7 +67,16 @@ function runCurl(
   throwIfDownloadAborted(context.signal);
   const args = curlArgs(url, out, range, maxBytes, noProxy);
   return new Promise<void>((resolve, reject) => {
-    const child = spawn('curl', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn('curl', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (error) {
+      // Same reasoning as probeRemoteSize: a synchronous spawn failure must
+      // reject this promise rather than throw out of the executor, where it
+      // becomes an unhandled rejection that can terminate the process.
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     let stderr = '';
     let settled = false;
     const timer = context.onProgress
@@ -85,7 +94,11 @@ function runCurl(
       if (error) reject(error);
       else resolve();
     };
-    const onAbort = () => child.kill('SIGTERM');
+    const onAbort = () => {
+      // Killing an already-exited child throws on some platforms; the abort is
+      // best-effort and must not surface as an install failure of its own.
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    };
     context.signal?.addEventListener('abort', onAbort, { once: true });
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += String(chunk);
@@ -119,30 +132,50 @@ async function downloadSingle(
 function probeRemoteSize(url: string, expectedBytes: number | undefined, signal?: AbortSignal): Promise<number> {
   throwIfDownloadAborted(signal);
   return new Promise<number>((resolve, reject) => {
-    const child = spawn('curl', ['-sS', '--max-time', '60', '-L', '-r', '0-0', '-D', '-', '-o', '/dev/null', url], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn('curl', ['-sS', '--max-time', '60', '-L', '-r', '0-0', '-D', '-', '-o', '/dev/null', url], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      // A synchronous spawn failure (missing binary, ENOENT on a shell shim)
+      // must reject, not escape the promise executor and become an unhandled
+      // rejection — that is what can take the whole server process down.
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     let stdout = '';
-    const onAbort = () => child.kill('SIGTERM');
+    let settled = false;
     const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const finish = (error: Error | null, size?: number) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(size!);
+    };
+    const onAbort = () => {
+      // Killing an already-dead child throws on some platforms; the abort is
+      // best-effort and must never replace the real failure.
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    };
     signal?.addEventListener('abort', onAbort, { once: true });
     child.stdout?.on('data', (chunk: Buffer) => { stdout += String(chunk); });
-    child.once('error', (error) => { cleanup(); reject(error); });
+    child.once('error', (error) => finish(error instanceof Error ? error : new Error(String(error))));
     child.once('close', (code) => {
-      cleanup();
-      if (signal?.aborted) { reject(downloadAborted(signal)); return; }
-      if (code !== 0) { reject(new Error(`range probe failed (curl exit ${code})`)); return; }
+      if (signal?.aborted) { finish(downloadAborted(signal)); return; }
+      if (code !== 0) { finish(new Error(`range probe failed (curl exit ${code})`)); return; }
       const match = /content-range:\s*bytes\s+\d+-\d+\/(\d+)/i.exec(stdout);
       const size = match ? Number(match[1]) : NaN;
       if (!Number.isFinite(size) || size <= 0 || size > MAX_CACHE_FILE_BYTES) {
-        reject(new Error(`invalid content-range: ${stdout.slice(0, 160)}`));
+        finish(new Error(`invalid content-range: ${stdout.slice(0, 160)}`));
         return;
       }
       if (expectedBytes !== undefined && size !== expectedBytes) {
-        reject(new Error(`remote model size mismatch: got ${size}, expected ${expectedBytes}`));
+        finish(new Error(`remote model size mismatch: got ${size}, expected ${expectedBytes}`));
         return;
       }
-      resolve(size);
+      finish(null, size);
     });
   });
 }

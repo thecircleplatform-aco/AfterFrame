@@ -175,10 +175,51 @@ export function asrModelEntry(id: string): AsrModelEntry | undefined {
   return ASR_MODELS.find((entry) => entry.id === id);
 }
 
+/**
+ * Resolve a catalog file for the download proxy's whitelist.
+ *
+ * Covers BOTH halves of a tier: the ONNX graph files used by the browser
+ * transcriber and the GGML weights used by the desktop whisper-cli worker.
+ * The GGML file was previously absent here, which made it un-downloadable
+ * through the proxy at all — the request 401'd on the whitelist because the
+ * tuple was not in `files`. That is why offline transcription could only be
+ * provisioned by hand.
+ *
+ * The GGML entry lives under its own modelId/revision in the upstream repo
+ * (ggml-org/whisper.cpp), so it is matched against the tier's `ggmlFile`
+ * fields rather than its `files`.
+ */
 export function asrModelFile(modelId: string, revision: string, path: string): AsrModelFile | undefined {
   const model = ASR_MODELS.find((entry) => entry.modelId === modelId && entry.revision === revision);
-  return model?.files.find((file) => file.path === path);
+  const direct = model?.files.find((file) => file.path === path);
+  if (direct) return direct;
+  // GGML weights: the upstream repo is named separately from the ONNX tier and
+  // publishes its files on `main`, not on the revision hash the catalog records
+  // for the ONNX graph. The SHA-256 below still pins the exact bytes.
+  if (modelId === GGML_UPSTREAM_MODEL_ID) {
+    const ggml = ASR_MODELS.find((entry) => entry.ggmlFile?.fileName === path)?.ggmlFile;
+    if (ggml) {
+      return { path: ggml.fileName, sizeBytes: ggml.sizeBytes, sha256: ggml.sha256 };
+    }
+  }
+  return undefined;
 }
+
+/** Upstream repo that hosts the whisper.cpp GGML weights (not the ONNX tiers).
+ *
+ * This is `ggerganov/whisper.cpp`, NOT `ggml-org/whisper.cpp`. The ggml-org path
+ * — and the revision hash pinned in `ggmlFile.revision` — do not resolve: a
+ * HEAD against
+ *   huggingface.co/ggml-org/whisper.cpp/resolve/5359861.../ggml-base-q5_1.bin
+ * returns 401 Unauthorized, which is why the weights were previously declared
+ * "not installable" and every offline transcription request dead-ended in
+ * Settings. `ggerganov/whisper.cpp` serves the same files (verified 200 +
+ * correct byte length). SHA-256 in the catalog still decides whether the bytes
+ * are right, so switching the repo cannot silently install something else.
+ */
+export const GGML_UPSTREAM_MODEL_ID = 'ggerganov/whisper.cpp';
+
+
 
 export type AsrDownloadStatus = 'idle' | 'downloading' | 'done' | 'error';
 export interface AsrDownloadTask {

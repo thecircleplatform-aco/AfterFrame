@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import { ASR_MODELS, asrModelFile, type AsrModelFile } from '../../shared/asr-models.ts';
 import { modelCachePath } from '../../shared/model-cache-path.ts';
 import { MODEL_PACKS, type ModelPackFile } from '../../shared/model-packs/catalog.ts';
+import { fetchDependencyFromR2, r2DependencySourceAvailable } from '../r2-dependencies.ts';
 import {
   fileMatchesIntegrity,
   openContainedVerifiedFile,
@@ -211,6 +212,30 @@ export async function downloadModelFile(
   const context: CurlContext = { ...options, expectedBytes, expectedSha256, progress: new Map() };
   let completed = false;
   try {
+    // R2 first: one origin the operator controls, so a dependency install does
+    // not depend on four public mirrors staying up and fast. It is a SOURCE,
+    // not a replacement — an unconfigured bucket or a missing object falls
+    // straight through to the mirrors below, and the SHA-256 check further
+    // down is what actually decides whether the bytes are the right ones, so
+    // trusting R2 here is no different from trusting ModelScope.
+    if (r2DependencySourceAvailable()) {
+      const fromR2 = await fetchDependencyFromR2(target, tmpPath, { signal: options.signal });
+      if (fromR2.kind === 'downloaded') {
+        // Same validation as any mirror: a wrong object in the bucket must be
+        // treated exactly like a wrong object anywhere else.
+        const size = (await stat(tmpPath)).size;
+        const sizeOk = expectedBytes !== undefined ? size === expectedBytes : size > 0 && size <= MAX_CACHE_FILE_BYTES;
+        const shaOk = !(expectedSha256 && expectedBytes)
+          || await fileMatchesIntegrity(tmpPath, { sizeBytes: expectedBytes, sha256: expectedSha256 });
+        if (sizeOk && shaOk) {
+          options.onProgress?.(size);
+          await rename(tmpPath, finalPath);
+          completed = true;
+          return finalPath;
+        }
+        await unlink(tmpPath).catch(() => undefined);
+      }
+    }
     let lastError: unknown;
     for (const source of SOURCES) {
       throwIfDownloadAborted(options.signal);
