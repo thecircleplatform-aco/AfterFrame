@@ -6,6 +6,29 @@ export const MAX_SERVER_RUN_EVENTS = MAX_EVENTS_PER_RUN;
 export const MAX_SERVER_EVENT_BYTES = 64 * 1024;
 export const MAX_SERVER_TOOL_REQUEST_EVENT_BYTES = 512 * 1024;
 export const MAX_SERVER_RUN_BYTES = 1024 * 1024;
+
+/**
+ * How long the server waits for a browser to CLAIM a tool request.
+ *
+ * Distinct from SERVER_RUN_AI_TIMEOUT.toolMs: that is the AI SDK's per-step
+ * deadline (deliberately generous, it bounds a whole provider step). This one
+ * bounds the gap before anything picks the request up at all.
+ *
+ * A tool request is answered by the open editor tab. If that tab is gone
+ * (reloaded, crashed, navigated away) nothing will ever claim the request, and
+ * the run would sit in `running` with the UI spinning on "Cross cutting… 328.5s"
+ * while blocking the composer and holding a run slot. The claim window only
+ * needs to cover "the editor is alive and will answer shortly", so it is short:
+ * editor mutations are milliseconds. Observed live: a run frozen at sequence 4
+ * for 200s+ with a tool_requested event no client ever claimed.
+ */
+export const SERVER_TOOL_CLAIM_TIMEOUT_MS = 90_000;
+
+/**
+ * After a browser HAS claimed a request it may legitimately run long (a render,
+ * a transcription), so this bound is generous — but still finite, so a
+ * claimed-then-abandoned tool cannot pin the run forever.
+ */
 export const SERVER_TOOL_RESULT_TIMEOUT_MS = 24 * 60 * 60_000;
 
 export type ServerRunStatus =

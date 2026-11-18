@@ -102,3 +102,45 @@ export function turnDisposition(hitMaxTokens: boolean, continued: boolean): Turn
   if (hitMaxTokens) return 'max-tokens';
   return continued ? 'continue' : 'completed';
 }
+
+/**
+ * Detect a turn that produced NOTHING actionable: no tool calls and no visible
+ * text, only reasoning.
+ *
+ * This is the "why are you stuck?" loop. The executor has no turn cap ("the
+ * model decides when the task is done"), which is correct for multi-step edits
+ * but assumes every turn either calls a tool or answers. A model that reasons
+ * "Let me check state." and then emits no tool call and no text satisfies
+ * neither: `continued` is false (no tool calls) and `outcome.text` is empty, so
+ * the loop keeps re-asking the same question with the reasoning appended.
+ * The run sits on a spinner for minutes while the visible transcript never
+ * changes, and each iteration costs a full request.
+ *
+ * A single empty turn is legitimate (providers occasionally return an empty
+ * delta), so this only trips on a run of them.
+ */
+export function isNoProgressTurn(text: string, toolCallCount: number): boolean {
+  return toolCallCount === 0 && text.trim().length === 0;
+}
+
+/** Consecutive no-progress turns tolerated before the run is stopped. */
+export const MAX_NO_PROGRESS_TURNS = 2;
+
+export interface NoProgressGuardState {
+  readonly consecutive: number;
+}
+
+export function trackNoProgress(
+  state: NoProgressGuardState,
+  text: string,
+  toolCallCount: number,
+): { state: NoProgressGuardState; stalled: boolean } {
+  if (!isNoProgressTurn(text, toolCallCount)) {
+    return { state: { consecutive: 0 }, stalled: false };
+  }
+  const consecutive = state.consecutive + 1;
+  return {
+    state: { consecutive },
+    stalled: consecutive >= MAX_NO_PROGRESS_TURNS,
+  };
+}

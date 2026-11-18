@@ -1,6 +1,7 @@
 import { compactToolResultForModel } from '../../src/agent/tool-result-compaction';
 import { isFailedToolResult, toolFailureReason } from '../../src/agent/toolFailure';
 import {
+  SERVER_TOOL_CLAIM_TIMEOUT_MS,
   SERVER_TOOL_RESULT_TIMEOUT_MS,
   type ServerRun,
   type ServerToolRequest,
@@ -85,7 +86,7 @@ export function registerToolRequest(
   toolCallId: string,
   toolName: string,
   argsDigest: string,
-  timeoutMs = SERVER_TOOL_RESULT_TIMEOUT_MS,
+  timeoutMs = SERVER_TOOL_CLAIM_TIMEOUT_MS,
 ): Promise<unknown> {
   // Once settlement starts, pending requests have been cancelled and new
   // events are dropped, so a request registered now would never be served.
@@ -107,7 +108,14 @@ export function registerToolRequest(
     request.status = 'cancelled';
     releaseToolRequest(request);
     void dependencies.mirrorTool(run, request, 'cancelled');
-    reject(new Error(`Agent tool request timed out: ${toolName}.`));
+    // The window that just closed is "nobody picked this up". That is fatal,
+    // not slow: the only party that can answer a browser tool request is the
+    // editor tab, and if it has not claimed within CLAIM_TIMEOUT it is gone.
+    // Rejecting fails the run so the UI settles instead of spinning forever.
+    reject(new Error(
+      `No editor claimed the ${toolName} tool request within ${Math.round(SERVER_TOOL_CLAIM_TIMEOUT_MS / 1000)}s; `
+      + 'the editor tab may have been closed or reloaded.',
+    ));
   }, timeoutMs);
   run.toolRequests.set(toolCallId, request);
   void dependencies.mirrorTool(run, request, 'pending');
@@ -130,7 +138,7 @@ export function waitForToolResult(
 }
 
 export function claimToolRequest(
-  dependencies: Pick<StoreToolDependencies, 'isRunTerminal'>,
+  dependencies: Pick<StoreToolDependencies, 'isRunTerminal' | 'mirrorTool'>,
   run: ServerRun,
   input: { toolCallId: string; argsDigest: string; claimId: string },
 ): ToolClaimOutcome {
@@ -141,6 +149,18 @@ export function claimToolRequest(
   if (!request.claimId) {
     request.claimId = input.claimId;
     request.claimedAt = Date.now();
+    // A claim proves an editor IS listening, so the request is no longer at risk
+    // of the "nobody is there" stall. Extend the deadline for the actual work
+    // (a render or transcription can legitimately outlast the claim window)
+    // while keeping it finite so an abandoned claim still cannot hang the run.
+    if (request.timeout) clearTimeout(request.timeout);
+    request.timeout = setTimeout(() => {
+      if (request.status !== 'pending') return;
+      request.status = 'cancelled';
+      releaseToolRequest(request);
+      void dependencies.mirrorTool(run, request, 'cancelled');
+      request.reject(new Error(`Agent tool request timed out after being claimed: ${request.toolName}.`));
+    }, SERVER_TOOL_RESULT_TIMEOUT_MS);
     return 'claimed';
   }
   return request.claimId === input.claimId ? 'duplicate' : 'already-claimed';

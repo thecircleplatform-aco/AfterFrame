@@ -285,7 +285,7 @@ await assert.rejects(
     abandonedDigest,
     5,
   ),
-  /tool request timed out/i,
+  /tool request timed out|No editor claimed/i,
   'a disconnected editor cannot park a server run forever',
 );
 assert.equal(claimToolRequest(abandonedRun, {

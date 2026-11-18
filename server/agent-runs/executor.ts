@@ -55,7 +55,9 @@ import {
   acceptanceInstructions,
   createAcceptanceLoop,
   decideAcceptanceAfterTurn,
+  trackNoProgress,
   turnDisposition,
+  type NoProgressGuardState,
 } from './acceptance-loop';
 import { createServerTools, type ActivationState } from './browser-tool';
 import { answerUnexecutedToolCalls } from './unexecuted-tool-calls';
@@ -130,6 +132,13 @@ async function executeServerTurn(
   continued: boolean;
   followupText: string | null;
   hitMaxTokens: boolean;
+  /**
+   * How many tools this turn called. Reported separately from `continued` so
+   * the no-progress guard can distinguish "reasoned but did nothing" from
+   * "called a tool". Optional because the external backends (codex /
+   * claude-code / copilot) own their own tool loop and do not report it.
+   */
+  toolCallCount?: number;
 }> {
   try {
     return await runServerTurnOnce(input);
@@ -166,6 +175,7 @@ async function runServerTurnOnce(
   continued: boolean;
   followupText: string | null;
   hitMaxTokens: boolean;
+  toolCallCount?: number;
 }> {
   const schemas = input.activation.current.schemas();
   const prepared = await prepareServerContext({ ...input, schemas });
@@ -211,6 +221,9 @@ async function runServerTurnOnce(
       ? [...prepared.messages, ...answerUnexecutedToolCalls(responseMessages, finishReason)]
       : prepared.messages,
     text,
+    // Reported separately from `continued` so the no-progress guard can tell
+    // "reasoned but did nothing" from "called a tool".
+    toolCallCount: toolCalls.length,
     followupText: input.activation.followupText,
     continued,
     hitMaxTokens: finishReason === 'length',
@@ -337,6 +350,12 @@ async function executeRunTurns(
   // No turn cap: the model decides when the task is done. The only automatic
   // stop beside "no more tool calls" is an output-token cutoff, which would
   // otherwise feed truncated text back into the loop.
+  //
+  // That assumption breaks when a turn produces neither a tool call nor any
+  // text (reasoning only). Nothing advances, so re-asking the identical
+  // question just reproduces the same reasoning — the run spins for minutes
+  // behind an unchanged transcript. `noProgress` bounds that.
+  let noProgress: NoProgressGuardState = { consecutive: 0 };
   for (let turn = 0; ; turn += 1) {
     const subprocessTurnInput = {
       run,
@@ -399,6 +418,28 @@ async function executeRunTurns(
       return;
     }
     messages = outcome.messages;
+    const progress = trackNoProgress(
+      noProgress,
+      outcome.text,
+      // External backends (codex / claude-code / copilot) own their own tool
+      // loop and do not report a per-turn call count. Treat "not reported" as
+      // "made progress" so the guard can never stop them — it only exists to
+      // break the in-process loop.
+      (outcome as { toolCallCount?: number }).toolCallCount ?? Number.POSITIVE_INFINITY,
+    );
+    noProgress = progress.state;
+    if (progress.stalled) {
+      // Stop instead of looping forever on a model that reasons without acting.
+      // Surface it as a real answer so the turn settles and the user gets a
+      // usable message rather than an indefinite spinner.
+      const message = 'I could not make progress on this request — my last attempts produced no action. '
+        + 'Could you restate what you want changed, or point me at the specific clip or track?';
+      pushRunEvent(run, 'text-delta', { text: message });
+      pushRunEvent(run, 'text-end', serverRunTextMetadata(message));
+      pushRunEvent(run, 'finish', { ...serverRunTextMetadata(message), guard: 'no-progress' } as never);
+      await setRunStatus(run, 'completed');
+      return;
+    }
     const disposition = turnDisposition(outcome.hitMaxTokens, outcome.continued);
     if (disposition === 'continue') continue;
     if (disposition === 'max-tokens') {
