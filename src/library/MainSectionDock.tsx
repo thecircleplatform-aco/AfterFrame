@@ -10,14 +10,20 @@ import { Icon, type IconName } from '../modules/icons';
 import { useT } from '../i18n/locale';
 import {
   MAIN_TABS,
+  SUB_TABS,
   getMainTab,
+  getSubTab,
   selectMainTab,
+  selectSubTab,
   subscribeMainTab,
   type MainTab,
+  type SubTab,
 } from './LibraryPanel';
 
 const TAB_ICONS: Record<MainTab, IconName> = {
-  'Agent': 'sparkles',
+  // The Agent is the model-driven section, so it gets the brain glyph rather
+  // than the generic sparkle (which reads as "magic effect" elsewhere in the UI).
+  'Agent': 'brain',
   'My Media': 'folder',
   'Sequences': 'film',
   'Library': 'grid',
@@ -26,9 +32,26 @@ const TAB_ICONS: Record<MainTab, IconName> = {
   'Skills': 'wand',
 };
 
+// Library sub-sections promoted to first-class dock entries with their own
+// labels, so Transitions/Effects/Zoom/LUT are one tap away instead of two.
+const SUB_TAB_ICONS: Record<SubTab, IconName> = {
+  'Motion graphics': 'diamond',
+  'Sound Effects': 'music',
+  'Transitions': 'swap',
+  'Effects': 'palette',
+  'Zoom': 'zoomIn',
+  'LUT': 'sliders',
+};
+
 export function MainSectionDock() {
   const t = useT();
   const active = useSyncExternalStore(subscribeMainTab, getMainTab, getMainTab);
+  const activeSub = useSyncExternalStore(subscribeMainTab, getSubTab, getSubTab);
+  // "Library" is no longer its own destination — it is the group that the six
+  // sub-sections belong to, so the split-out entries carry the selection.
+  const restTabs = MAIN_TABS.filter((tab) => tab !== 'Library');
+  const libraryActive = active === 'Library';
+  const itemClass = (on: boolean): string => `cc-dock-item${on ? ' selected' : ''}`;
   const ref = useRef<HTMLElement | null>(null);
   // The strip scrolls sideways with no visible scrollbar, which leaves it
   // unreachable without a trackpad: arrow/Page/Home/End move it, and tabbing to
@@ -56,16 +79,31 @@ export function MainSectionDock() {
   return (
     <nav className="cc-main-dock" aria-label={t('Media library sections')}
       ref={ref} tabIndex={0} onKeyDown={onKeyDown} onFocus={onFocus}>
-      {MAIN_TABS.map((tab) => (
+      {restTabs.map((tab) => (
         <button
           key={tab}
           type="button"
           onClick={() => selectMainTab(tab)}
-          className={`cc-dock-item${active === tab ? ' selected' : ''}`}
+          className={itemClass(active === tab)}
           aria-current={active === tab ? 'page' : undefined}
           title={t(tab)}
         >
           <span className="cc-dock-icon"><Icon name={TAB_ICONS[tab]} size={17} /></span>
+          <span className="cc-dock-label">{t(tab)}</span>
+        </button>
+      ))}
+      {/* Divider marks where the Library family begins. */}
+      <span className="cc-dock-sep" aria-hidden="true" />
+      {SUB_TABS.map((tab) => (
+        <button
+          key={tab}
+          type="button"
+          onClick={() => selectSubTab(tab)}
+          className={itemClass(libraryActive && activeSub === tab)}
+          aria-current={libraryActive && activeSub === tab ? 'page' : undefined}
+          title={`${t('Library')} · ${t(tab)}`}
+        >
+          <span className="cc-dock-icon"><Icon name={SUB_TAB_ICONS[tab]} size={17} /></span>
           <span className="cc-dock-label">{t(tab)}</span>
         </button>
       ))}

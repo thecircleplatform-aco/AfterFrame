@@ -113,3 +113,8 @@ public/whisper-cli/
 **/.dev.vars
 # Local copy of the shared worker secrets (SEND_KEY, RESEND_API_KEY)
 .secrets.local
+
+# Bundled Node 24 runtime (downloaded by toolchain, never source)
+.node24/
+.node_src/
+

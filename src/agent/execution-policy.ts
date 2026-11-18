@@ -113,6 +113,13 @@ export function policyForTool(
   args?: Readonly<Record<string, unknown>>,
 ): ToolExecutionPolicy {
   if (name === 'manage_design_style') return designStylePolicy(args);
+  // `check` only reads the filesystem and spawns `-version`; `install` writes a
+  // binary, so it is a persistent local change and needs user approval.
+  if (name === 'ensure_dependencies') {
+    return args?.action === 'install'
+      ? { effect: 'persistent_local', recovery: 'idempotent' }
+      : { effect: 'read', recovery: 'pure' };
+  }
   if (READ_TOOLS.has(name) || isExternalReadTool(name) || isExternalGlobalReadTool(name)) {
     return { effect: 'read', recovery: 'pure' };
   }

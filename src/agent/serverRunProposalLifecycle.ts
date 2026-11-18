@@ -108,6 +108,7 @@ function createTurn(
     persistentOps: [],
     persistentBeforeDoc: null,
     runSessionId: null,
+    turnId: input.turnId ?? crypto.randomUUID(),
     // Auto-apply is what the composer would do with the proposal anyway; landing the edits
     // as they happen just stops the user from waiting for the end of the run to see them.
     liveEdits: !input.askOnly

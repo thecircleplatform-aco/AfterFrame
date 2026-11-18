@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { MediaAsset, MediaFolder } from '../editor/types';
 import type { MusicAnalysisCardState } from '../audio/intelligence/useMusicAnalysisCards';
 import { useT } from '../i18n/locale';
@@ -238,20 +238,64 @@ export function MissingMediaBanner({ count, onOpen, onRemoveAll }: MissingMediaB
 }
 
 /**
- * One line for the whole pool instead of a "models not installed" badge on every audio and
- * video card: the badge only ever said the same thing, and repeated per card it read like
- * a problem with each asset.
+ * One line for the whole pool instead of a "models not installed" badge on every
+ * audio and video card: the badge only ever said the same thing, and repeated per
+ * card it read like a problem with each asset.
+ *
+ * It INSTALLS rather than pointing at Settings. Both packs are SHA-pinned and
+ * download through the same verified path the Settings pane uses, so sending the
+ * user on an errand to press an equivalent button was pure friction — and the
+ * notice stayed on screen for anyone who never got there.
  */
 export function MusicModelsNotice({ cards }: { cards: ReadonlyMap<string, MusicAnalysisCardState> }) {
   const t = useT();
+  const [phase, setPhase] = useState<'idle' | 'installing' | 'failed' | 'done'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+
   let unavailable = false;
   for (const state of cards.values()) {
     if (state.state === 'unavailable') { unavailable = true; break; }
   }
-  if (!unavailable) return null;
+  if (!unavailable || phase === 'done') return null;
+
+  const install = async (): Promise<void> => {
+    setPhase('installing');
+    setMessage(null);
+    try {
+      // Sequential, so the shared download manager is not asked to run two large
+      // transfers at once against the same cache directory.
+      for (const id of ['rhythm-pack', 'music-semantics-pack']) {
+        const response = await fetch('/api/deps/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null) as { error?: string } | null;
+          throw new Error(body?.error ?? `install failed (HTTP ${response.status})`);
+        }
+      }
+      setPhase('done');
+    } catch (failure) {
+      setPhase('failed');
+      setMessage(failure instanceof Error ? failure.message : String(failure));
+    }
+  };
+
   return (
-    <div className="cc-media-export-guide" role="note">
-      {t('Local music-analysis models are not installed, so cards show no analysis entry. Install the Rhythm and Music Semantics packs under Settings → Local AI to analyze.')}
+    <div className="cc-media-export-guide" role="note" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ flex: 1, minWidth: 180 }}>
+        {phase === 'installing'
+          ? t('Installing the music-analysis models. This runs in the background — you can keep editing.')
+          : phase === 'failed'
+            ? t('Could not install the music-analysis models. {reason}', { reason: message ?? '' })
+            : t('Music analysis needs two local model packs (~118 MB once). Install them to analyze tracks and match music to your cut.')}
+      </span>
+      {phase !== 'installing' && (
+        <button type="button" onClick={() => { void install(); }} style={bannerButton}>
+          {phase === 'failed' ? t('Retry') : t('Install models')}
+        </button>
+      )}
     </div>
   );
 }

@@ -162,7 +162,7 @@ function setupLocalServerRun(
   prepareServerRunTransport(environment.refs, abort);
   environment.updateMessages((current) => [
     ...current,
-    { role: 'user', text: trimmed, retry: createAgentRetry(trimmed, sendOptions) },
+    { role: 'user', text: trimmed, retry: createAgentRetry(trimmed, sendOptions), turnId: prepared.turnId },
     { role: 'assistant', text: '' },
   ]);
   return {
@@ -247,6 +247,7 @@ async function admitServerRun(
     references: payload.references,
     baseDoc: active.baseDoc,
     resumed: false,
+    turnId: active.turnId,
   });
   throwIfAborted(abort.signal);
   activateServerRunTools(environment, active, recovery);

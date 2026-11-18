@@ -36,6 +36,12 @@ import { SlipTwoUpPreview } from './SlipTwoUpPreview';
 import { PREVIEW_SHARED_AUDIO_TAGS } from './previewAudioPool';
 import { SafeZoneOverlay } from './SafeZoneOverlay';
 import { PreviewTransformOverlay } from './preview/PreviewTransformOverlay';
+import { PreviewPopover, PreviewPopoverRow } from './preview/PreviewPopover';
+import {
+  bumpPreviewFontSize,
+  cyclePreviewAlign,
+  previewTextEditFields,
+} from './preview/previewTextEdit';
 import { fitPreviewCanvasSize, previewPaddedClientSize, previewStageContentSize, type PreviewCanvasSize } from './preview/previewCanvasGeometry';
 
 const MEDIA_LOADING_NOTICE_DELAY_MS = 160;
@@ -44,36 +50,6 @@ const PREVIEW_SOURCE_CYCLE: readonly PreviewSourceMode[] = ['auto', 'original', 
 
 function previewStatusKey(status: Pick<SelectedPreviewStatus, 'kind' | 'targetId'>): string {
   return `${status.kind}\u0000${status.targetId}`;
-}
-
-function PreviewSourceToggle() {
-  const t = useT();
-  const mode = useSyncExternalStore(subscribeQualityMode, getPreviewSourceMode, getPreviewSourceMode);
-  const label = mode === 'original' ? t('High') : mode === 'proxy' ? t('Smooth') : t('Auto');
-  const title = mode === 'original'
-    ? t('High: shows the original media — best quality, may cost performance')
-    : mode === 'proxy'
-      ? t('Smooth: uses a lightweight copy for smoother playback')
-      : t('Auto: follows the quality policy (quality first = High, balanced = Smooth)');
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        const index = PREVIEW_SOURCE_CYCLE.indexOf(mode);
-        setPreviewSourceMode(PREVIEW_SOURCE_CYCLE[(index + 1) % PREVIEW_SOURCE_CYCLE.length]!);
-      }}
-      title={title}
-      aria-label={title}
-      style={{
-        fontSize: 11, lineHeight: 1, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
-        border: `0.5px solid ${theme.border}`,
-        background: mode === 'original' ? theme.panelAlt : 'transparent',
-        color: mode === 'auto' ? theme.textDim : theme.text,
-      }}
-    >
-      {t('Preview quality')}: {label}
-    </button>
-  );
 }
 
 interface PreviewPanelProps {
@@ -138,6 +114,31 @@ export const PreviewPanel = memo(function PreviewPanel({
   const [stageSize, setStageSize] = useState<PreviewCanvasSize>({ width: 0, height: 0 });
   const [busy, setBusy] = useState(false);
   const [showSafe, setShowSafe] = useState(false);
+  // The preview toolbar's three panels. Kept mutually exclusive: opening one
+  // closes the others so they never stack over each other on the picture.
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [guidesOpen, setGuidesOpen] = useState(false);
+  const [textOpen, setTextOpen] = useState(false);
+  const qualityBtnRef = useRef<HTMLButtonElement>(null);
+  const guidesBtnRef = useRef<HTMLButtonElement>(null);
+  const propertiesBtnRef = useRef<HTMLButtonElement>(null);
+  const previewSourceMode = useSyncExternalStore(subscribeQualityMode, getPreviewSourceMode, getPreviewSourceMode);
+  const qualityLabel = previewSourceMode === 'original' ? t('High') : previewSourceMode === 'proxy' ? t('Smooth') : t('Auto');
+  // Text edits need a one-shot "start editing" signal to the overlay: the bar
+  // that used to sit on the clip is gone, so the panel asks it to open instead.
+  const [textEditRequest, setTextEditRequest] = useState(0);
+  const textFields = useMemo(() => (selectedItem ? previewTextEditFields(selectedItem) : null), [selectedItem]);
+
+  /** Opens the inline text editor, which lives in the transform overlay. */
+  const onRequestTextEdit = () => setTextEditRequest((n) => n + 1);
+  const onBumpFontSize = (direction: 1 | -1) => {
+    if (!selectedItem || !textFields?.fontSizeKey) return;
+    onItemPropChange?.(selectedItem.id, textFields.fontSizeKey, bumpPreviewFontSize(textFields, direction));
+  };
+  const onCycleAlign = () => {
+    if (!selectedItem || !textFields?.alignKey) return;
+    onItemPropChange?.(selectedItem.id, textFields.alignKey, cyclePreviewAlign(textFields.align));
+  };
   const [autoEditCaption, setAutoEditCaption] = useState<{ trackId: TrackId; laneId: string } | null>(null);
   // Expose Player during full screen preview (` shortcut key/timeline toolbar button to make Player full screen)
   // Comes with a control bar; the editing state still uses the timeline transport, and does not display dual sets of controls.
@@ -280,42 +281,9 @@ export const PreviewPanel = memo(function PreviewPanel({
   }));
   return (
     <section style={{ display: 'flex', flex: 1, flexDirection: 'column', background: theme.panel, minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
-      <div className="cc-preview-header" style={{ height: 30, padding: '0 12px', display: 'flex', alignItems: 'center', borderBottom: `0.5px solid ${theme.border}`, flexShrink: 0 }}>
-        <span style={{ fontSize: 12, color: theme.text }}>{t('Preview')}</span>
-        {pickMode && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 10, fontSize: 11, color: theme.accent }}>
-            <Icon name="cursor" size={11} />
-            {t('Select mode: drag a box on the canvas to reference it')}
-          </span>
-        )}
-        <div className="cc-preview-header-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {state.items.length > 0 && (
-            <PreviewSourceToggle />
-          )}
-          {state.items.length > 0 && (
-            <button type="button" onClick={() => setShowSafe((v) => !v)} aria-pressed={showSafe}
-              title={t('Toggle the title and action safe guides (composition aid for vertical output)')}
-              style={{
-                fontSize: 11, lineHeight: 1, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
-                border: `0.5px solid ${theme.border}`, background: showSafe ? theme.panelAlt : 'transparent',
-                color: showSafe ? theme.text : theme.textDim,
-              }}>
-              {t('Safe guides')}
-            </button>
-          )}
-          {selectedItem && (
-            <button type="button" onClick={onToggleInspector} aria-pressed={inspectorOpen}
-              title={inspectorOpen ? t('Collapse properties') : t('Expand properties')}
-              style={{
-                fontSize: 11, lineHeight: 1, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
-                border: `0.5px solid ${theme.border}`, background: inspectorOpen ? theme.panelAlt : 'transparent',
-                color: inspectorOpen ? theme.text : theme.textDim,
-              }}>
-              {t('Properties')}
-            </button>
-          )}
-        </div>
-      </div>
+      {/* No header bar: it cost 30px of vertical space for two rarely-touched
+          switches. They float over the stage instead, fading out with the rest
+          of the chrome and coming back on hover/focus. */}
       <div ref={stageRef} className="cc-preview-stage"
         // Suppress the browser's native <video> context menu (download / picture-in-picture
         // / loop) because the preview is a canvas, not an exposed HTML5 video element.
@@ -423,7 +391,8 @@ export const PreviewPanel = memo(function PreviewPanel({
             {showSafe && <SafeZoneOverlay />}
             {pickMode && <RegionPickOverlay state={state} playerRef={playerRef} />}
             {!pickMode && !fullscreen && transformApi && (
-              <PreviewTransformOverlay state={state} playerRef={playerRef} {...transformApi} />
+              <PreviewTransformOverlay state={state} playerRef={playerRef} {...transformApi}
+                textEditRequest={textEditRequest} />
             )}
             {!pickMode && !fullscreen && onUpdateCaptions && captionTrackEntries(state).map(({ id, captions }) => captions?.enabled ? (
               <CaptionPreviewEditor
@@ -442,6 +411,143 @@ export const PreviewPanel = memo(function PreviewPanel({
             ) : null)}
           </div>
         )}
+        {/* Top bar. Everything the preview can do lives here in one row, so the
+            picture is never covered by controls that follow a selection. Panels
+            that need more than an on/off state open below their own button. */}
+        {(state.items.length > 0 || pickMode) && (
+          <div className="cc-preview-bar">
+            {pickMode && (
+              <span className="cc-preview-bar-badge">
+                <Icon name="cursor" size={10} />
+                {t('Drag a box on the canvas to reference it')}
+              </span>
+            )}
+            {state.items.length > 0 && (
+              <button type="button" ref={qualityBtnRef}
+                className={`cc-preview-bar-btn${qualityOpen ? ' is-on' : ''}`}
+                onClick={() => { setQualityOpen((v) => !v); setGuidesOpen(false); }}
+                aria-expanded={qualityOpen}
+                title={t('Preview quality')}>
+                <Icon name="film" size={11} />
+                {t('Preview quality')}: {qualityLabel}
+              </button>
+            )}
+            {state.items.length > 0 && (
+              <button type="button" ref={guidesBtnRef}
+                className={`cc-preview-bar-btn${showSafe ? ' is-on' : ''}`}
+                onClick={() => { setGuidesOpen((v) => !v); setQualityOpen(false); }}
+                aria-expanded={guidesOpen} aria-pressed={showSafe}
+                title={t('Composition guides')}>
+                <Icon name="grid" size={11} />
+                {t('Guides')}
+              </button>
+            )}
+            {selectedItem && !inspectorOpen && (
+              <button type="button" ref={propertiesBtnRef}
+                className="cc-preview-bar-btn"
+                onClick={onToggleInspector}
+                title={t('Show properties')}>
+                <Icon name="sliders" size={11} />
+                {t('Properties')}
+              </button>
+            )}
+            {selectedItem && inspectorOpen && (
+              // The inspector occupies the right side of the preview, so its
+              // toggle collapses to an icon rather than a labelled pill that
+              // would sit underneath the panel it opened.
+              <button type="button" ref={propertiesBtnRef}
+                className="cc-preview-bar-btn is-on is-icon"
+                onClick={onToggleInspector} aria-pressed
+                title={t('Hide properties')} aria-label={t('Hide properties')}>
+                <Icon name="sliders" size={11} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <PreviewPopover open={qualityOpen} anchor={qualityBtnRef.current} width={224}
+          title={t('Preview quality')} onClose={() => setQualityOpen(false)}>
+          {PREVIEW_SOURCE_CYCLE.map((mode) => (
+            <button key={mode} type="button"
+              className={`cc-preview-pop-option${previewSourceMode === mode ? ' is-on' : ''}`}
+              onClick={() => { setPreviewSourceMode(mode); setQualityOpen(false); }}>
+              <span className="cc-preview-pop-option-name">
+                {mode === 'auto' ? t('Auto') : mode === 'original' ? t('High') : t('Smooth')}
+              </span>
+              <span className="cc-preview-pop-option-hint">
+                {mode === 'auto'
+                  ? t('Follows your quality policy')
+                  : mode === 'original'
+                    ? t('Original media — best quality, heavier')
+                    : t('Lightweight copy — smoother playback')}
+              </span>
+            </button>
+          ))}
+        </PreviewPopover>
+
+        <PreviewPopover open={guidesOpen} anchor={guidesBtnRef.current} width={224}
+          title={t('Composition guides')} onClose={() => setGuidesOpen(false)}>
+          <PreviewPopoverRow label={t('Safe zones')}
+            hint={t('Title and action safe for vertical output')}>
+            <button type="button" role="switch" aria-checked={showSafe}
+              className={`cc-preview-switch${showSafe ? ' is-on' : ''}`}
+              onClick={() => setShowSafe((v) => !v)} aria-label={t('Safe zones')}>
+              <span className="cc-preview-switch-knob" />
+            </button>
+          </PreviewPopoverRow>
+        </PreviewPopover>
+
+        <PreviewPopover open={textOpen} anchor={propertiesBtnRef.current} width={252}
+          title={t('Selected clip')} onClose={() => setTextOpen(false)}>
+          {textFields ? (
+            <>
+              {onSeedChat && textFields.textKey && (
+                <button type="button" className="cc-preview-pop-action is-ai"
+                  onClick={() => {
+                    setTextOpen(false);
+                    onSeedChat(t('Improve this on-screen text (keep layout): "{text}"', {
+                      text: textFields.text || t('(empty)'),
+                    }));
+                  }}>
+                  <Icon name="sparkles" size={12} />
+                  {t('Ask AI to rewrite this text')}
+                </button>
+              )}
+              <PreviewPopoverRow label={t('Text')}>
+                <button type="button" className="cc-preview-pop-action is-compact"
+                  onClick={() => { setTextOpen(false); onRequestTextEdit?.(); }}>
+                  <Icon name="pencil" size={11} />
+                  {t('Edit')}
+                </button>
+              </PreviewPopoverRow>
+              {textFields.colorKey && (
+                <PreviewPopoverRow label={t('Color')}>
+                  <span className="cc-preview-pop-swatch" style={{ background: textFields.color }} />
+                </PreviewPopoverRow>
+              )}
+              {textFields.fontSizeKey && (
+                <PreviewPopoverRow label={t('Size')}>
+                  <div className="cc-preview-pop-stepper">
+                    <button type="button" aria-label={t('Smaller text')}
+                      onClick={() => onBumpFontSize?.(-1)}>A−</button>
+                    <button type="button" aria-label={t('Bigger text')}
+                      onClick={() => onBumpFontSize?.(1)}>A+</button>
+                  </div>
+                </PreviewPopoverRow>
+              )}
+              {textFields.alignKey && (
+                <PreviewPopoverRow label={t('Align')}>
+                  <button type="button" className="cc-preview-pop-action is-compact"
+                    onClick={() => onCycleAlign?.()}>
+                    {textFields.align === 'left' ? '⫷' : textFields.align === 'right' ? '⫸' : '☰'}
+                  </button>
+                </PreviewPopoverRow>
+              )}
+            </>
+          ) : (
+            <p className="cc-preview-pop-empty">{t('Select a text clip to edit it here.')}</p>
+          )}
+        </PreviewPopover>
       </div>
     </section>
   );

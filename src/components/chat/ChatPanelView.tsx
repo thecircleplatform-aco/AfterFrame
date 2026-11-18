@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeftIcon } from '@animateicons/react/lucide/chevron-left-icon';
 import { ChevronRightIcon } from '@animateicons/react/lucide/chevron-right-icon';
 import { QrCodeIcon } from '@animateicons/react/lucide/qr-code-icon';
@@ -12,6 +13,7 @@ import { AgentRunInspector } from './AgentRunInspector';
 import { ChatComposer } from './ChatComposer';
 import { playMessageSentSound } from './sendSound';
 import { ChatMessage } from './ChatMessage';
+import { clearAgentHeader, publishAgentHeader, type AgentHeaderNotice } from './agentHeaderBridge';
 import { ChatRunStatus } from './ChatRunStatus.tsx';
 import { ExternalProposalCard } from './ExternalProposalCard';
 import { ProposalCard } from './ProposalCard';
@@ -21,13 +23,26 @@ import type { DisplayMessage } from '../../agent/agent-session';
 import { readStoredServerRun } from '../../agent/serverRunSessionStorage';
 import type { ChatPanelController } from './chatPanelController';
 import { CapabilityBanner } from './CapabilityGapBanner';
+import { CAPABILITY_LABELS, formatCapabilityNames, missingCreativeCaps } from './capabilityBanner';
+import { getLocale } from '../../i18n/locale';
 import { RemotePairDialog } from '../../modules/remote/RemotePairDialog';
+import { QuestionStepper } from './QuestionStepper';
+import { ResendConfirm } from './ResendConfirm';
+import { parseWidgets, type WidgetSegment } from './widget-parse';
+import { planExecutionMessage } from './plan-parse';
 
 /** Purple → pink → blue, matching the agent panel's edge mist. */
 /** The welcome mark's tint lives in index.css (`.cc-chat-welcome-mark > span`),
  *  where it can also animate; a static inline gradient would override it. */
 
 const MESSAGE_WINDOW_SIZE = 40;
+
+/**
+ * How long a setup advisory (e.g. "some tools are not configured") stays in the
+ * notification popover before it dismisses itself. Long enough to read while
+ * editing, short enough that it never becomes permanent chrome.
+ */
+const CAPABILITY_NOTICE_TTL_MS = 120_000;
 
 function ChangeLogPortal({ controller }: { controller: ChatPanelController }) {
   const { changeLogSlot, agent } = controller;
@@ -137,8 +152,43 @@ function MessageEntries({ controller }: { controller: ChatPanelController }) {
   // second try. Only the latest turn offers it — rewinding an earlier one would discard
   // every turn after it as well.
   const lastUser = lastUserTurn(agent.messages);
-  const onRetry = (index: number, retry: NonNullable<DisplayMessage['retry']>) => {
+  // The widget that the stepper above the composer is currently serving. Every
+  // other copy of it in the transcript collapses to a pointer so the user never
+  // sees two identical forms for the same turn.
+  const dockedWidget = pendingWidget(agent.messages);
+  const [confirm, setConfirm] = useState<{
+    index: number;
+    retry: NonNullable<DisplayMessage['retry']>;
+    edit: boolean;
+  } | null>(null);
+
+  /** Later user turns are what a rewind from `index` throws away. */
+  const laterTurns = (index: number) =>
+    agent.messages.slice(index + 1).filter((message) => message.role === 'user').length;
+
+  /**
+   * Timeline edit sessions produced by this turn. `turnId` is stamped on every
+   * session a run writes, so this names exactly what a rewind undoes instead of
+   * guessing by list position (one turn can emit several sessions, and older
+   * chats predate the field).
+   */
+  const impactedEdits = (index: number) => {
+    const turnId = agent.messages[index]?.turnId;
+    if (!turnId) return [];
+    return agent.changeLog
+      .filter((session) => session.turnId === turnId && session.rollbackable)
+      .map((session) => ({ summary: session.summary, operations: session.operations.length }));
+  };
+
+  const run = (index: number, retry: NonNullable<DisplayMessage['retry']>, edit: boolean) => {
     if (agent.running) return;
+    if (edit) {
+      // Hand the text back to the composer instead of firing it off, so the
+      // user can rewrite before the history is truncated.
+      composer.setInput(retry.text);
+      agent.rewindTurn(index);
+      return;
+    }
     agent.rewindTurn(index);
     playMessageSentSound();
     void agent.send(retry.text, {
@@ -148,6 +198,11 @@ function MessageEntries({ controller }: { controller: ChatPanelController }) {
       references: retry.references,
     });
   };
+
+  const pendingImpact = confirm
+    ? { turns: laterTurns(confirm.index), edits: impactedEdits(confirm.index) }
+    : { turns: 0, edits: [] };
+
   return <>
     {groupMessages(visibleMessages, visibleFrom).map((item) => item.kind === 'toolgroup' ? (
       <ToolGroupRow key={item.index} name={item.name} items={item.items} onOpenSettings={props.onOpenSettings} />
@@ -155,15 +210,38 @@ function MessageEntries({ controller }: { controller: ChatPanelController }) {
       <ChatMessage key={item.index} msg={item.msg} running={agent.running}
         onOpenSettings={props.onOpenSettings}
         retry={item.msg.role === 'user' && item.index === lastUser ? item.msg.retry : undefined}
+        laterTurns={laterTurns(item.index)}
         streaming={agent.running && item.index === agent.messages.length - 1 && item.msg.role === 'assistant'}
         widgetSubmitted={agent.messages.slice(item.index + 1).some((message) => message.role === 'user')}
-        onRetry={(retry) => onRetry(item.index, retry)}
+        widgetDocked={dockedWidget?.index === item.index}
+        onRetry={(retry) => setConfirm({ index: item.index, retry, edit: false })}
+        onEdit={(retry) => setConfirm({ index: item.index, retry, edit: true })}
+        onPlanRun={(steps) => {
+          if (agent.running) return;
+          // Running a plan is an edit, so it has to leave read-only Plan mode:
+          // sending it under `askOnly` would just re-plan and never apply.
+          composer.setMode('agent');
+          playMessageSentSound();
+          void agent.send(planExecutionMessage(steps), { mode: 'agent' });
+        }}
         onContinue={item.msg.role === 'continue' && item.index === agent.messages.length - 1 && !agent.running
           ? () => { playMessageSentSound(); void agent.send('Continue'); } : null}
         onWidgetSubmit={(answer) => {
           if (!agent.running) { playMessageSentSound(); void agent.send(answer, { askOnly: composer.mode !== 'agent', mode: composer.mode }); }
         }} />
     ))}
+    <ResendConfirm
+      open={confirm !== null}
+      impact={pendingImpact}
+      busy={agent.running}
+      onCancel={() => setConfirm(null)}
+      onConfirm={() => {
+        if (!confirm) return;
+        const target = confirm;
+        setConfirm(null);
+        run(target.index, target.retry, target.edit);
+      }}
+    />
   </>;
 }
 
@@ -237,13 +315,114 @@ function ComposerInput({ controller }: { controller: ChatPanelController }) {  c
 }
 
 function ComposerSection({ controller }: { controller: ChatPanelController }) {
-  return <div style={{ padding: '2px 12px 12px', minWidth: 0, flexShrink: 0, boxSizing: 'border-box' }}>
+  const { agent, composer, t } = controller;
+  const pending = pendingWidget(agent.messages);
+  const answer = (text: string) => {
+    if (!agent.running) {
+      playMessageSentSound();
+      void agent.send(text, { askOnly: composer.mode !== 'agent', mode: composer.mode });
+    }
+  };
+  return <div style={{
+    padding: '2px 12px 12px', minWidth: 0, flexShrink: 0, boxSizing: 'border-box',
+    display: 'flex', flexDirection: 'column', minHeight: 0,
+  }}>
+    {pending && (
+      <QuestionStepper
+        fields={pending.widget.fields}
+        title={pending.widget.title}
+        messagePrefix={pending.widget.messagePrefix}
+        submitLabel={pending.widget.submitLabel}
+        onSubmit={answer}
+        // Cancelling is an answer, not a no-op: the run is parked in
+        // `awaiting-user`, so it needs a prompt to resume with.
+        onCancel={() => answer(t('Use your best judgement — decide for me.'))}
+      />
+    )}
     <ComposerInput controller={controller} />
   </div>;
 }
 
+/**
+ * The most recent assistant message whose text contains a widget and that has no
+ * user reply after it. Only the last one is stepped through — an older unanswered
+ * card is dead history once a newer question is asked.
+ */
+function pendingWidget(messages: DisplayMessage[]): { index: number; widget: WidgetSegment } | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === 'user') return null;
+    if (message.role !== 'assistant') continue;
+    const widget = parseWidgets(message.text ?? '').find((segment): segment is WidgetSegment => segment.type === 'widget');
+    if (widget) return { index, widget };
+  }
+  return null;
+}
+
 function ExpandedPanel({ controller }: { controller: ChatPanelController }) {
-  const { scroll } = controller;
+  const { scroll, agent, props, t } = controller;
+  // Capability gaps used to render as an inline banner above the conversation.
+  // On a short viewport that cost ~105px, which pushed the composer off screen
+  // as soon as the question stepper opened. When the sheet header hosts the
+  // chat, the same advisory is published into its bell popover instead and
+  // auto-dismisses after a while; hosts drawing their own chrome keep the
+  // banner because they have no bell to receive it.
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const missing = missingCreativeCaps();
+  const noticeTitle = t('Some tools are not configured yet');
+  const noticeDetail = missing.length
+    ? t('Unavailable: {names}', {
+      names: formatCapabilityNames(missing.map((key) => t(CAPABILITY_LABELS[key] ?? key)), getLocale()),
+    })
+    : undefined;
+  const notices = useMemo<AgentHeaderNotice[]>(() => {
+    if (!props.hideHeader || noticeDismissed || !props.onOpenSettings || missing.length === 0) return [];
+    return [{
+      id: 'capability-gap',
+      title: noticeTitle,
+      detail: noticeDetail,
+      actionLabel: t('Open settings'),
+      onAction: () => props.onOpenSettings?.(),
+    }];
+  }, [noticeDismissed, missing.length, noticeDetail, noticeTitle, props.hideHeader, props.onOpenSettings, t]);
+
+  // A configuration gap is setup advice, not an alarm: leave it in the bell for
+  // a while, then get out of the way. Dismissing it also stops the badge from
+  // nagging for the rest of the session.
+  useEffect(() => {
+    if (noticeDismissed || notices.length === 0) return;
+    const timer = setTimeout(() => setNoticeDismissed(true), CAPABILITY_NOTICE_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [noticeDismissed, notices.length]);
+
+  // Publish what the sheet header can drive (see agentHeaderBridge). The header
+  // renders outside this subtree when it hosts the chat, so its controls need a
+  // channel back to the live controller.
+  useEffect(() => {
+    if (!props.hideHeader) return;
+    publishAgentHeader({
+      running: agent.running,
+      noticeCount: notices.length + (controller.remote.guestCount > 0 ? 1 : 0) + (agent.running ? 1 : 0),
+      notices,
+      remoteOpen: controller.remoteOpen,
+      guestCount: controller.remote.guestCount,
+      dismissNotice: (id: string) => {
+        if (id === 'capability-gap') setNoticeDismissed(true);
+      },
+      clearHistory: agent.clearHistory,
+      setRemoteOpen: controller.setRemoteOpen,
+    });
+  }, [
+    agent.clearHistory,
+    agent.running,
+    controller.props.hideHeader,
+    controller.remote.guestCount,
+    controller.remoteOpen,
+    controller.setRemoteOpen,
+    notices,
+    props.hideHeader,
+  ]);
+  useEffect(() => () => clearAgentHeader(), []);
   return <>
     <ChangeLogPortal controller={controller} />
     <aside className="cc-chat-panel" data-cc-chat-popover-boundary data-cc-shortcut-surface="agent-chat"
@@ -265,8 +444,9 @@ function ExpandedPanel({ controller }: { controller: ChatPanelController }) {
       }}>
       {/* Hosts that draw their own chrome (the Agent portal) pass `hideHeader`
           so the workspace does not end up with two stacked title bars. */}
-      {!controller.props.hideHeader && <ChatHeader controller={controller} />}
-      <CapabilityBanner controller={controller} />
+      {!props.hideHeader && <ChatHeader controller={controller} />}
+      {/* Only hosts without a bell popover keep the inline banner. */}
+      {!props.hideHeader && <CapabilityBanner controller={controller} />}
       <MessageWorkspace controller={controller} />
       <ComposerSection controller={controller} />
       {controller.remoteOpen && <RemotePairDialog host={controller.remote} onClose={() => controller.setRemoteOpen(false)} />}

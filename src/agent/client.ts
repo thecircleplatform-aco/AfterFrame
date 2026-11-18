@@ -12,6 +12,8 @@ import { normalizeLlmMessages, withoutModelImages } from './messages';
 import { getActiveAgentModelChoice, getAgentModelSnapshot, type AgentModelChoice } from './model-selection';
 import { effectiveOutputTokenBudget } from './context-compaction';
 import type { AgentCacheMode } from './settings/agentSettings';
+import { byokConnection, byokFetch } from '../tier/byokClient';
+import { shouldUseByok } from '../tier/resolve';
 
 export {
   MODEL,
@@ -109,6 +111,21 @@ const providerFetch: typeof fetch = async (input, init) => {
 };
 
 function providerOptions(provider: LlmProvider): ProviderOptions {
+  // Free (BYOK) tier: the user's own key is used and the browser calls the
+  // vendor directly. Anything else -- including every hosted deployment and
+  // every provider that blocks browser CORS -- keeps the original server-proxy
+  // path untouched below.
+  if (shouldUseByok(provider)) {
+    const connection = byokConnection(provider);
+    if (connection.ok) {
+      return {
+        baseURL: connection.connection.baseURL,
+        apiKey: connection.connection.apiKey,
+        headers: connection.connection.headers,
+        fetch: byokFetch(provider),
+      };
+    }
+  }
   return {
     baseURL: PROXY_API_BASE,
     apiKey: PROXY_KEY,

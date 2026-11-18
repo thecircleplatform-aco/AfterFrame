@@ -349,6 +349,30 @@ async function startDownload(id: string): Promise<ModelPackTask> {
   }
   return taskSnapshot(task);
 }
+/**
+ * Start a model-pack download outside the HTTP route.
+ *
+ * The dependency provisioner uses this so a missing pack can be installed from
+ * the same code path the Settings pane uses: pinned SHA-256 per file, atomic
+ * directory swap, resume-safe staging. Re-implementing the download there would
+ * fork the integrity checks.
+ *
+ * Returns as soon as the download is RUNNING (the flight is not awaited), which
+ * is what lets the caller report "installing" instead of holding a request open
+ * for a 118 MB transfer.
+ */
+export async function startModelPackDownload(id: string): Promise<ModelPackTask> {
+  return startDownload(id);
+}
+
+/** Whether the pack's files are present and hash-verified on disk. */
+export async function isModelPackInstalled(id: string): Promise<boolean> {
+  const pack = modelPackDefinition(id);
+  if (!pack) return false;
+  await ensureRecovered();
+  return (await inspectPack(pack)).installed;
+}
+
 async function cancelDownload(id: string): Promise<void> {
   const pack = modelPackDefinition(id);
   if (!pack) throw new Error(`Unknown model pack: ${id || '(empty)'}`);

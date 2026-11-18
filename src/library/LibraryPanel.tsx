@@ -117,10 +117,21 @@ interface LibraryPanelProps {
   onApplyFx: (assetId: string) => void;
   /** The built-in curve passes {shape}; the plugin curve passes {envelope, label} (see PluginBrowser.asPluginZoom) */
   onApplyZoom: (zoom: ZoomEffect) => void;
+  /** Filter typed into the sheet header's search field; applies to every
+      Library sub-section. */
+  sheetQuery?: string;
+  /** Filter panel opened from the header's right-corner button. */
+  filtersOpen?: boolean;
+  /** Reports how many filters are active so the header can badge its button. */
+  onActiveFilterCountChange?: (count: number) => void;
 }
 
 const MAIN_TABS = ['Agent', 'My Media', 'Sequences', 'Library', 'Transcript', 'Subtitles', 'Skills'] as const;
 type MainTab = (typeof MAIN_TABS)[number];
+
+/** Library sub-sections. Each one is also a footer-dock entry. */
+const SUB_TABS = ['Motion graphics', 'Sound Effects', 'Transitions', 'Effects', 'Zoom', 'LUT'] as const;
+type SubTab = (typeof SUB_TABS)[number];
 
 /**
  * The active section is owned outside the panel: the dock that switches it is
@@ -128,8 +139,13 @@ type MainTab = (typeof MAIN_TABS)[number];
  */
 let activeMainTab: MainTab = 'Agent';
 let mainTabSheetOpen = false;
+// The Library's own sub-section, hoisted out of the panel for the same reason as
+// the main tab: the footer dock shows a direct entry per sub-section, so tapping
+// "Transitions" there must reopen the Library on that sub-section from anywhere.
+let activeSubTab: SubTab = 'Motion graphics';
 const mainTabListeners = new Set<() => void>();
 export function getMainTab(): MainTab { return activeMainTab; }
+export function getSubTab(): SubTab { return activeSubTab; }
 export function getMainTabSheetOpen(): boolean { return mainTabSheetOpen; }
 export function subscribeMainTab(listener: () => void): () => void {
   mainTabListeners.add(listener);
@@ -161,14 +177,28 @@ export function closeMainTabSheet(): void {
   mainTabSheetOpen = false;
   notifyMainTab();
 }
-export { MAIN_TABS };
-export type { MainTab };
-const SUB_TABS = ['Motion graphics', 'Sound Effects', 'Transitions', 'Effects', 'Zoom', 'LUT'] as const;
+
+/** Select a Library sub-section and make sure the Library sheet is open. */
+export function selectSubTab(tab: SubTab): void {
+  // Same toggle semantics as the dock: re-tapping the open sub-section closes
+  // the sheet, so the dock stays the single open/close control.
+  if (activeMainTab === 'Library' && mainTabSheetOpen && activeSubTab === tab) {
+    mainTabSheetOpen = false;
+    notifyMainTab();
+    return;
+  }
+  activeSubTab = tab;
+  activeMainTab = 'Library';
+  mainTabSheetOpen = true;
+  notifyMainTab();
+}
+export { MAIN_TABS, SUB_TABS };
+export type { MainTab, SubTab };
 function localizeDefaultSequenceName(name: string, t: ReturnType<typeof useT>): string {
   const match = /^\u5e8f\u5217 (\d+)$/.exec(name);
   return match ? t('Sequence {n}', { n: match[1]! }) : name;
 }
-export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddAudio, playerRef, fps, items, getSequenceOptions, onAddSequence, trackOptions, captionTracks, onSetCaptions, onCreateCaptionTrack, onUpdateCaptions, onSetItemTranscript, onToggleWord, onCleanScript, onSetGapCap, onSetTranscriptPlayOrder, onReorderTrackItems, onClearEdits, assets, mediaFolders, usedAssetIds, offlineAssetIds, onAssetLoadError, onImportMedia, onImportMobileMedia, onIngestDirectoryAsset, onTranscribeAsset, onAddMediaItem, onAddMediaAssetsToTimeline, onUseMediaAI, onCreateMediaFolder, onRenameMediaFolder, onDeleteMediaFolder, onMoveMediaAssets, onRenameMediaAsset, onRenameMediaAssets, onSetMediaAssetFavorite, onSetMediaAssetsFavorite, onRemoveMediaAsset, onRemoveMediaAssets, onPasteMediaAssets, onRelinkMediaAsset, creativeMode, onCreativeModeChange, onAddSolid, onUseTemplateAI, selectedItem, onApplyTransition, onApplyFx, onApplyZoom }: LibraryPanelProps) {
+export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddAudio, playerRef, fps, items, getSequenceOptions, onAddSequence, trackOptions, captionTracks, onSetCaptions, onCreateCaptionTrack, onUpdateCaptions, onSetItemTranscript, onToggleWord, onCleanScript, onSetGapCap, onSetTranscriptPlayOrder, onReorderTrackItems, onClearEdits, assets, mediaFolders, usedAssetIds, offlineAssetIds, onAssetLoadError, onImportMedia, onImportMobileMedia, onIngestDirectoryAsset, onTranscribeAsset, onAddMediaItem, onAddMediaAssetsToTimeline, onUseMediaAI, onCreateMediaFolder, onRenameMediaFolder, onDeleteMediaFolder, onMoveMediaAssets, onRenameMediaAsset, onRenameMediaAssets, onSetMediaAssetFavorite, onSetMediaAssetsFavorite, onRemoveMediaAsset, onRemoveMediaAssets, onPasteMediaAssets, onRelinkMediaAsset, creativeMode, onCreativeModeChange, onAddSolid, onUseTemplateAI, selectedItem, onApplyTransition, onApplyFx, onApplyZoom, sheetQuery, filtersOpen, onActiveFilterCountChange }: LibraryPanelProps) {
   const t = useT();
   const selKind = selectedItem?.kind ?? null;
   const isVisual = selKind != null && selKind !== 'audio';
@@ -177,7 +207,9 @@ export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddA
   // Every internal jump (SRT import, opening caption styles) goes through the
   // shared setter so the footer dock's highlight follows along.
   const setMainTab = (tab: MainTab): void => { selectMainTab(tab); };
-  const [subTab, setSubTab] = useState<(typeof SUB_TABS)[number]>('Motion graphics');
+  const [subTab, setSubTabState] = useState<SubTab>(getSubTab);
+  // The dock owns sub-section selection now, so the panel only mirrors it.
+  useEffect(() => subscribeMainTab(() => setSubTabState(getSubTab())), []);
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [directoryImportError, setDirectoryImportError] = useState<string | null>(null);
   const directoryImport = useDirectoryImport({
@@ -241,7 +273,7 @@ export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddA
       {mainTab === 'Agent' ? null : extensionOpen ? (
         <ExtensionCenter onClose={() => setExtensionOpen(false)} />
       ) : isCaptions ? (
-        <CaptionsPanel playerRef={playerRef} fps={fps} items={items} captionTracks={captionTracks} onSetCaptions={onSetCaptions} onUpdateCaptions={onUpdateCaptions} />
+        <CaptionsPanel playerRef={playerRef} fps={fps} items={items} captionTracks={captionTracks} trackOptions={trackOptions} onSetCaptions={onSetCaptions} onUpdateCaptions={onUpdateCaptions} onCreateCaptionTrack={onCreateCaptionTrack} onSetItemTranscript={onSetItemTranscript} />
       ) : isTranscript ? (
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, borderTop: `0.5px solid ${theme.border}` }}>
           <TranscriptPanel playerRef={playerRef} fps={fps} items={items} trackOptions={trackOptions} onSetItemTranscript={onSetItemTranscript} onToggleWord={onToggleWord} onCleanScript={onCleanScript} onSetGapCap={onSetGapCap} onSetTranscriptPlayOrder={onSetTranscriptPlayOrder} onReorderTrackItems={onReorderTrackItems} onClearEdits={onClearEdits} onImportSrt={(file) => { void importSrt(file); }} onOpenCaptionStyles={openCaptionStyles} />
@@ -272,7 +304,8 @@ export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddA
           <MediaPoolPanel semanticScopeId={semanticScopeId} assets={assets} folders={mediaFolders} fps={fps} usedAssetIds={usedAssetIds} offlineAssetIds={offlineAssetIds} onAssetLoadError={onAssetLoadError} onImport={onImportMedia} onImportMobile={onImportMobileMedia} directoryImport={directoryImport} directoryImportError={directoryImportError} onAddAsset={onAddMediaItem} onAddAssetsToTimeline={onAddMediaAssetsToTimeline} onAddAssetsToChat={onUseMediaAI}
             onCreateFolder={onCreateMediaFolder} onRenameFolder={onRenameMediaFolder} onDeleteFolder={onDeleteMediaFolder}
             onMoveAssets={onMoveMediaAssets} onRenameAsset={onRenameMediaAsset} onTranscribe={onTranscribeAsset} onRenameAssets={onRenameMediaAssets} onSetFavorite={onSetMediaAssetFavorite} onSetAssetsFavorite={onSetMediaAssetsFavorite} onRemoveAsset={onRemoveMediaAsset} onRemoveAssets={onRemoveMediaAssets} onPasteAssets={onPasteMediaAssets}
-            onRelinkAsset={onRelinkMediaAsset} onAddSolid={onAddSolid} />
+            onRelinkAsset={onRelinkMediaAsset} onAddSolid={onAddSolid} headerSearch={sheetQuery !== undefined} externalQuery={sheetQuery}
+            filtersOpen={filtersOpen} onActiveFilterCountChange={onActiveFilterCountChange} />
         </div>
       ) : isSkills ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, borderTop: `0.5px solid ${theme.border}` }}>
@@ -283,28 +316,29 @@ export function LibraryPanel({ semanticScopeId, templates, onAddTemplate, onAddA
         </div>
       ) : (
       <>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, padding: '10px 12px 7px 16px', fontSize: 12, borderBottom: `0.5px solid ${theme.border}` }}>
-        <div style={{ display: 'flex', gap: 14, minWidth: 0, overflowX: 'auto', whiteSpace: 'nowrap', flex: 1 }}>
-          {SUB_TABS.map((tab) => (
-            <button key={tab} onClick={() => setSubTab(tab)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: subTab === tab ? theme.text : theme.textDim, borderBottom: `2px solid ${subTab === tab ? theme.accent : 'transparent'}`, padding: '0 0 4px' }}>{t(tab)}</button>
-          ))}
-        </div>
+      {/* The sub-section strip is gone: the footer dock now switches Library
+          sections directly, so repeating them here duplicated the control and
+          clipped labels ("Sound Effect…") in the narrow sheet. What remains is
+          the one action that is not a section — Extension Center. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '4px 12px 6px', flex: '0 0 auto' }}>
         <button
           type="button"
           onClick={() => setExtensionOpen(true)}
+          className="cc-sheet-ghost-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 5,
             flex: '0 0 auto',
-            border: `0.5px solid ${theme.border}`,
-            borderRadius: 4,
-            background: theme.panelAlt,
+            border: 0,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.07)',
             color: theme.text,
-            padding: '4px 7px',
+            padding: '5px 10px',
             fontSize: 10.5,
             cursor: 'pointer',
+            backdropFilter: 'blur(14px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(14px) saturate(1.4)',
           }}
         >
           <Icon name="grid" size={12} />

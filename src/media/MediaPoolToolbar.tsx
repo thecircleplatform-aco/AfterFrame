@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -35,6 +36,14 @@ interface MediaPoolToolbarProps {
   uploadRatio: number | null;
   canAddSolid: boolean;
   semanticOpenRequest?: number;
+  /** When the sheet header owns a global search field, the pool's own box is
+   *  redundant chrome — and two stacked search inputs is the first thing a user
+   *  notices. Hide ours and let the header drive the query. */
+  hideSearch?: boolean;
+  /** Header-owned filter state: when set, the header button controls the menu
+   *  and this component only renders the popover. */
+  filtersOpen?: boolean;
+  onActiveFilterCountChange?: (count: number) => void;
   onQueryChange: (value: string) => void;
   onSemanticResults: (matches: SemanticMatch[] | null) => void;
   onUpload: () => void;
@@ -70,9 +79,19 @@ function useMenuLifecycleEffects(
 ): void {
   useLayoutEffect(() => {
     if (!menu) return;
+    // The Filter button can live in the sheet header (when the header owns the
+    // toolbar chrome), so `anchorRef` is null there. Fall back to a
+    // data-attribute lookup so the popover can still position itself; without
+    // this it stayed at `visibility: hidden` and the button looked dead.
+    const resolveAnchor = (): HTMLElement | null => {
+      if (anchorRef.current) return anchorRef.current;
+      const selector = menu ? `[data-cc-toolbar-anchor="${menu}"]` : '';
+      return selector ? document.querySelector<HTMLElement>(selector) : null;
+    };
     const updatePosition = () => {
-      if (!anchorRef.current || !menuRef.current) return;
-      const anchor = anchorRef.current.getBoundingClientRect();
+      const anchorEl = resolveAnchor();
+      if (!anchorEl || !menuRef.current) return;
+      const anchor = anchorEl.getBoundingClientRect();
       const popover = menuRef.current.getBoundingClientRect();
       const left = Math.min(window.innerWidth - popover.width - 8, Math.max(8, anchor.right - popover.width));
       const top = anchor.bottom + popover.height + 8 <= window.innerHeight
@@ -80,8 +99,10 @@ function useMenuLifecycleEffects(
         : Math.max(8, anchor.top - popover.height - 4);
       setActionsStyle({ left, top, visibility: 'visible' });
     };
-    const isOutside = (target: Node) =>
-      !menuRef.current?.contains(target) && !anchorRef.current?.contains(target);
+    const isOutside = (target: Node) => {
+      const anchorEl = resolveAnchor();
+      return !menuRef.current?.contains(target) && !anchorEl?.contains(target);
+    };
     const onPointerDown = (event: PointerEvent) => { if (isOutside(event.target as Node)) close(); };
     const onFocus = (event: FocusEvent) => { if (isOutside(event.target as Node)) close(); };
     const onKey = (event: KeyboardEvent) => {
@@ -107,6 +128,7 @@ function useMenuLifecycleEffects(
 function useToolbarMenuLifecycle(
   menu: MediaToolbarMenu,
   onMenuChange: (menu: MediaToolbarMenu) => void,
+  filtersOpen?: boolean,
 ): ToolbarMenuLifecycle {
   const menuRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -122,19 +144,26 @@ function useToolbarMenuLifecycle(
     anchorRef.current = anchor;
     onMenuChange(menu === next ? null : next);
   }, [menu, onMenuChange]);
-  useMenuLifecycleEffects(menu, menuRef, anchorRef, close, setActionsStyle);
+  // `menu` gates positioning/outside-click. When the sheet header owns the
+  // button, `menu` is never set — the header passes `filtersOpen` instead — so
+  // the lifecycle must run off the *effective* open state, otherwise the
+  // popover mounts but stays at `visibility: hidden`.
+  const effectiveMenu = filtersOpen ? 'filter' as Exclude<MediaToolbarMenu, null> : menu;
+  useMenuLifecycleEffects(effectiveMenu, menuRef, anchorRef, close, setActionsStyle);
   return { menuRef, actionsStyle, toggle, close, restoreFocus };
 }
 
 export function MediaPoolToolbar(props: MediaPoolToolbarProps) {
   const t = useT();
-  const lifecycle = useToolbarMenuLifecycle(props.menu, props.onMenuChange);
+  const lifecycle = useToolbarMenuLifecycle(props.menu, props.onMenuChange, props.filtersOpen);
   return (
     <div className="cc-media-toolbar">
-      <label className="cc-media-search">
-        <Icon name="search" size={16} />
-        <input aria-label={t('Search media')} value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder={t('Search')} />
-      </label>
+      {!props.hideSearch && (
+        <label className="cc-media-search">
+          <Icon name="search" size={16} />
+          <input aria-label={t('Search media')} value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder={t('Search')} />
+        </label>
+      )}
       <SemanticSearchControls scopeId={props.scopeId} assets={props.assets} onResultsChange={props.onSemanticResults} openRequest={props.semanticOpenRequest} />
       <button className="cc-media-icon cc-tip" aria-label={t('Upload media')} data-tip={t('Upload media')} disabled={props.busy} onClick={props.onUpload}><Icon name="upload" size={19} /></button>
       {props.busy && props.uploadRatio != null && <span className="cc-media-upload-pct" title={t('Uploading')}>{Math.round(props.uploadRatio * 100)}%</span>}
@@ -174,7 +203,13 @@ function SortMenu(props: MenuProps) {
 
 function FilterMenu(props: MenuProps) {
   const t = useT();
-  const open = props.menu === 'filter';
+  // The sheet header owns the Filter button when it is present, so the menu's
+  // open state comes from there instead of the local toolbar state.
+  const open = props.filtersOpen !== undefined ? props.filtersOpen : props.menu === 'filter';
+  const activeCount = (props.type !== 'all' ? 1 : 0) + (props.favoritesOnly ? 1 : 0);
+  useEffect(() => {
+    props.onActiveFilterCountChange?.(activeCount);
+  }, [activeCount, props.onActiveFilterCountChange]);
   const popover = open && <div
     ref={props.lifecycle.menuRef}
     role="dialog"
@@ -185,9 +220,11 @@ function FilterMenu(props: MenuProps) {
     {FILTER_OPTIONS.map(([value, label]) => <button aria-pressed={props.type === value} key={value} className={props.type === value ? 'selected' : ''} onClick={() => props.onTypeChange(value)}>{t(label)}</button>)}
     <button aria-pressed={props.favoritesOnly} className={props.favoritesOnly ? 'selected' : ''} onClick={props.onFavoritesChange}><span className="cc-media-menu-label"><Icon name="star" size={13} filled={props.favoritesOnly} /> {t('Favorite')}</span></button>
   </div>;
+  // When the header renders the button, this only mounts the popover.
+  if (props.filtersOpen !== undefined) return <>{portalToolbarPopover(popover)}</>;
   return (
     <div className="cc-media-menu-anchor">
-      <button className={`cc-media-icon cc-tip${open || props.type !== 'all' || props.favoritesOnly ? ' active' : ''}`} aria-label={t('Filter media')} data-tip={t('Filter')} aria-haspopup="dialog" aria-expanded={open} onClick={(event) => props.lifecycle.toggle('filter', event.currentTarget)}><Icon name="filter" size={19} /></button>
+      <button className={`cc-media-icon cc-tip${open || activeCount > 0 ? ' active' : ''}`} aria-label={t('Filter media')} data-tip={t('Filter')} aria-haspopup="dialog" aria-expanded={open} onClick={(event) => props.lifecycle.toggle('filter', event.currentTarget)}><Icon name="filter" size={19} /></button>
       {portalToolbarPopover(popover)}
     </div>
   );

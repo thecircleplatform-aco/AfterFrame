@@ -10,13 +10,51 @@ const BOOT_TOOL_NAMES: Record<string, true> = {
   read_project: true,
   read_timeline: true,
   ask_followup_questions: true,
+  // Plan mode's only output channel; gating it behind tool search would leave
+  // the model with nothing to call after investigating.
+  propose_plan: true,
   report_user_friction: true,
   read_agent_artifact: true,
+  // Vision. The system prompt requires verifying visual edits with a rendered
+  // frame ("Do not infer media contents from filenames or report visual quality
+  // from imagination"), but these were only reachable through ToolSearch or a
+  // narrow keyword route. A model told to verify its work while unable to see
+  // anything will either skip verification or invent a description, so the
+  // ability to look has to be available on every turn, not requested by name.
+  view_timeline_frames: true,
+  view_asset_frames: true,
+  // Missing local tooling is a dead end the model cannot reason its way out of.
+  // Keeping the check on every turn means the agent diagnoses instead of telling
+  // the user to run a terminal command; the install half still needs approval.
+  ensure_dependencies: true,
 };
 
+// Phrases that mean "look, don't touch". These gate whether the mutating
+// routing groups are allowed at all, so a missing language does not merely lose
+// precision — it hands editing tools to a user who explicitly asked for a
+// read-only answer. Kept in the user's own language rather than relying on the
+// English list plus translation.
 const READ_ONLY_TERMS = [
   'Do not modify', 'Do not edit', 'Read-only',
   'read only', 'read-only', 'do not edit', "don't edit", 'without editing',
+  // 中文
+  '不要修改', '不要编辑', '不要改动', '别修改', '别改', '只读', '只查看', '只告诉我', '仅查看', '不修改', '不要动',
+  // 日本語
+  '変更しないで', '編集しないで', '修正しないで', '見るだけ', '読み取り専用',
+  // 한국어
+  '수정하지 마', '편집하지 마', '변경하지 마', '읽기 전용', '보기만',
+  // Русский
+  'не изменять', 'не редактировать', 'только посмотреть', 'только чтение',
+  // Español / Français / Deutsch / Português / Italiano
+  'no modificar', 'no editar', 'solo lectura', 'sin editar',
+  'ne pas modifier', 'ne pas éditer', 'lecture seule', 'sans modifier',
+  'nicht ändern', 'nicht bearbeiten', 'nur lesen', 'schreibgeschützt',
+  'não modificar', 'não editar', 'somente leitura', 'sem editar',
+  'non modificare', 'non modificare nulla', 'solo lettura', 'senza modificare',
+  // ไทย / हिन्दी / العربية
+  'ห้ามแก้ไข', 'ไม่ต้องแก้ไข', 'อ่านเท่านั้น', 'ดูเท่านั้น',
+  'बदलें नहीं', 'संपादित न करें', 'केवल पढ़ें', 'सिर्फ देखें',
+  'لا تعدل', 'لا تحرر', 'للقراءة فقط', 'اعرض فقط',
 ];
 
 /** A natural-language hint may narrow initial routing, but never becomes tool authority. */

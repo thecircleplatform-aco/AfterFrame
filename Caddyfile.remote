@@ -1,0 +1,55 @@
+# Public entry point for the phone remote (remote.af.acocloud.app).
+#
+# The phone remote is normally LAN-only: the desktop opens a tokenised listener
+# on a random port and the QR carries a http://<lan-ip>:<port>/r/<token> URL.
+# That breaks the moment the phone leaves the Wi-Fi, and plain http on a LAN IP
+# is not a secure context, so the camera/QR-scanner and clipboard APIs are
+# unavailable on some browsers.
+#
+# This block gives that same listener a public, trusted HTTPS name. Nothing about
+# the session model changes — the tunnel forwards to the listener the service
+# already booted, so the phone reaches the identical tokenised broker and the
+# desktop tab stays the only executor.
+#
+# The token in /r/<token> is the only credential. It is 24 random bytes,
+# session-scoped, and expires; there is no other surface here to protect. Do NOT
+# expose /api/remote-control through this vhost — it is loopback-only by design
+# and proxying it would let a paired phone mint new sessions.
+#
+# Wire-up (docker compose):
+#   - set REMOTE_PUBLIC_ORIGIN=https://remote.af.acocloud.app on the app service
+#     so the pairing sheet offers the public URL and puts it in the QR
+#   - point a DNS CNAME for remote.af.acocloud.app at this host
+#   - set LOCAL_REMOTE_PORT on the app service to a fixed port and point
+#     REMOTE_UPSTREAM at it. The listener uses an ephemeral port by default,
+#     which would make the public URL 502 after every restart.
+
+{$REMOTE_PUBLIC_HOST:remote.af.acocloud.app} {
+	encode zstd gzip
+
+	# SSE transcript mirror + action stream: never buffer, never time out.
+	reverse_proxy {$REMOTE_UPSTREAM:host.docker.internal:5199} {
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+		# The phone UI is an event stream; buffering it would make the agent's
+		# replies arrive in bursts instead of streaming.
+		flush_interval -1
+	}
+
+	request_body {
+		# Matches the service's image upload cap (20 MB) with headroom.
+		max_size 24MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# The remote page is a private, per-session surface: keep it out of
+		# search indexes and away from framing.
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+}

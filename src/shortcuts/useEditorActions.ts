@@ -17,6 +17,7 @@ interface EditorActionDeps {
   openExport: () => void;
   openDesign: () => void;
   openHistory: () => void;
+  openVault: () => void;
   openShortcuts: () => void;
   toggleLayout: () => void;
   focusAgent: () => void;
@@ -138,6 +139,7 @@ function viewActions(deps: EditorActionDeps): ActionBindings {
     'open-export': () => deps.openExport(),
     'open-design': () => deps.openDesign(),
     'open-history': () => deps.openHistory(),
+    'open-vault': () => deps.openVault(),
     'toggle-layout': () => deps.toggleLayout(),
     'ask-ai': () => deps.focusAgent(),
   };

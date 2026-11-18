@@ -416,6 +416,137 @@
       }
     },
     {
+      "name": "list_transitions",
+      "description": "List available video transitions (174 total). Use `query` for a fuzzy search — \"smooth\", \"glitch\", \"wipe\", \"zoom\", \"light\" all match ids, names and groups. Returns {id, name, group}. Then call add_transition with the id (or a group name to pick one at random from that family).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Fuzzy search over id, name and group. Omit to list the first entries."
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "dissolve",
+              "slide",
+              "wipe",
+              "shape",
+              "blur",
+              "light",
+              "glitch",
+              "warp",
+              "pattern",
+              "camera",
+              "fold",
+              "color",
+              "bars",
+              "mosaic",
+              "luma",
+              "audio",
+              "other"
+            ],
+            "description": "Restrict to one family (dissolve, slide, wipe, shape, blur, light, glitch, warp, pattern, camera, fold, color, bars, mosaic, luma, audio)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20, max 60)."
+          }
+        }
+      }
+    },
+    {
+      "name": "add_transition",
+      "description": "Add a transition between two adjacent same-track clips. Provide `incomingItemId` (the clip that starts the cut); the outgoing clip is found automatically. `transition` accepts an exact id from list_transitions, a group name like \"wipe\" (a random member of that family is chosen), or a description like \"quick glitch\". Duration defaults to 15 frames and is clamped to half of the shorter neighbouring clip.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "incomingItemId": {
+            "type": "string",
+            "description": "Clip id whose BEGINNING the transition covers."
+          },
+          "transition": {
+            "type": "string",
+            "description": "Exact transition id, group name, or natural-language description."
+          },
+          "durationInFrames": {
+            "type": "number",
+            "description": "Length in frames (min 2). Defaults to 15."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ],
+            "description": "Direction for directional wipes/slides. Defaults to left."
+          }
+        },
+        "required": [
+          "incomingItemId",
+          "transition"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_transition",
+      "description": "Update an existing transition in place: change its type (same resolution rules as add_transition), duration, direction, or enable/disable it without removing it.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "description": "Transition item id (from read_timeline)."
+          },
+          "transition": {
+            "type": "string",
+            "description": "New transition id / group / description. Optional."
+          },
+          "durationInFrames": {
+            "type": "number",
+            "description": "New length in frames. Optional."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "false keeps the transition but renders a hard cut."
+          }
+        },
+        "required": [
+          "transitionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove_transition",
+      "description": "Remove a transition, restoring a hard cut between the two clips.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "description": "Transition item id."
+          }
+        },
+        "required": [
+          "transitionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "read_transcript",
       "description": "Read the current timeline transcript as a compact phrase view for planning and semantic editing. This is the default transcript reading surface for long videos and multiple takes: words are grouped by speaker changes, pauses, and a bounded phrase size while retaining source item, source timestamps, timeline frames, and original word-index ranges. Deleted/trimmed words are omitted, but the word-level transcript remains unchanged for precise edits. Use find_transcript when locating a specific quote instead.",
       "input_schema": {
@@ -4075,6 +4206,46 @@
       }
     },
     {
+      "name": "propose_plan",
+      "description": "Present an executable plan as an editable step list with a Run button. Use this in Plan mode instead of writing a numbered list in prose. Each step is one meaningful operation with its exact target, so the user can edit or delete steps before running them. Do not call this and also repeat the steps as markdown — the card is the plan.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "description": "Ordered steps: { title, detail? }. 3–12 steps is typical; keep each title under ~70 characters.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Short imperative step, e.g. \"Trim the intro to the first beat\"."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Optional specifics: track alias, clip id, frame range, expected result."
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional plan title, e.g. \"Tighten the talking-head cut\"."
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional caveat or prerequisite worth showing above the buttons."
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      }
+    },
+    {
       "name": "list_projects",
       "description": "List AfterFrame projects this browser owns (id, name, updatedAt, editorUrl), newest first. Discovery only — does not retarget the editor. Call target_project before editing another project. Pass includeDeleted=true to also list soft-deleted projects for restore_project.",
       "input_schema": {
@@ -4606,6 +4777,38 @@
         },
         "required": [
           "repo"
+        ]
+      }
+    },
+    {
+      "name": "ensure_dependencies",
+      "description": "Inspect and provision the local tooling this app needs (ffmpeg, whisper.cpp, MediaPipe). Use it when a task failed because something is not installed, instead of telling the user to run a terminal command. action=\"check\" lists what is ready and what is missing, with the consequence of each gap. action=\"install\" starts the installer for one missing id. It is a local change, so get consent first: call action=\"check\", then use ask_followup_questions to name the gap and offer Install / Skip. Only call action=\"install\" after the user picks Install. Then continue immediately — the installer runs in the background and returns state=\"installing\" rather than blocking. Never start the same install twice. Always re-check before retrying the original task.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "check",
+              "install"
+            ],
+            "description": "check = list status; install = provision one missing dependency."
+          },
+          "id": {
+            "type": "string",
+            "enum": [
+              "ffmpeg",
+              "whisper-cli",
+              "whisper-model",
+              "mediapipe",
+              "rhythm-pack",
+              "music-semantics-pack"
+            ],
+            "description": "Required for action=\"install\": which dependency to provision."
+          }
+        },
+        "required": [
+          "action"
         ]
       }
     },
@@ -6163,6 +6366,128 @@
       }
     },
     {
+      "name": "web_browser",
+      "description": "Read a web page through Firecrawl (requires its key), or as Parallel excerpts when the user enabled WEB_SEARCH_PROVIDER=parallel. Parallel supports markdown excerpts and an optional query; advanced formats/actions require provider=firecrawl. formats: markdown (default), html, rawHtml, images, links, branding, summary, screenshot, videos. branding = native brand kit (colors/fonts/logo); summary = native page summary. screenshot is auto-saved to media pool as screenshotAssetId when possible. For many known URLs use web_batch_scrape; site discovery use web_map; multi-page crawl use web_crawl; search use web_search.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "firecrawl"
+            ],
+            "description": "Optional. \"parallel\" works only when the user enabled WEB_SEARCH_PROVIDER=parallel; \"firecrawl\" requires a configured key."
+          },
+          "url": {
+            "type": "string",
+            "description": "Page URL (http/https)."
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "html",
+                "rawHtml",
+                "images",
+                "links",
+                "branding",
+                "summary",
+                "screenshot",
+                "videos"
+              ]
+            },
+            "description": "Default ['markdown']."
+          },
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "Strip nav/footer (default true)."
+          },
+          "fullPage": {
+            "type": "boolean",
+            "description": "Full-page screenshot when format includes screenshot."
+          },
+          "waitFor": {
+            "type": "number",
+            "description": "ms wait before extract (0–10000)."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout ms (max 60000)."
+          },
+          "country": {
+            "type": "string",
+            "description": "Geo country code e.g. 'US'."
+          },
+          "query": {
+            "type": "string",
+            "description": "Focus for Parallel excerpts; structured-extraction prompt for Firecrawl."
+          },
+          "schema": {
+            "description": "JSON schema for structured extraction."
+          },
+          "actions": {
+            "type": "array",
+            "description": "Firecrawl page actions before scrape (click/wait/scroll/…), max 10. For type=executeJavascript, script MUST NOT contain a top-level return statement (Firecrawl rejects it with SyntaxError: Illegal return statement) — write the script as a bare expression or wrap it in an IIFE like (() => { ... })().",
+            "items": {}
+          },
+          "execJs": {
+            "type": "string",
+            "description": "JS to run before extract (max 10000 chars). No top-level return allowed — use a bare expression or an IIFE."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web through Firecrawl (requires its key), or anonymous Parallel Search MCP when the user enabled WEB_SEARCH_PROVIDER=parallel. Returns titles, URLs and descriptions; Firecrawl can also scrape markdown per hit, Parallel returns source excerpts. Use provider to override; country/lang/tbs filters require Firecrawl. Use site: / filetype: operators in query when helpful. Prefer this to inventing URLs. Then web_browser a specific URL for deep scrape/screenshot.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "firecrawl"
+            ],
+            "description": "Optional. \"parallel\" works only when the user enabled WEB_SEARCH_PROVIDER=parallel; \"firecrawl\" requires a configured key."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query (supports operators like site:example.com)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results 1–20 (default 5)."
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO country e.g. 'US' (default US on Firecrawl)."
+          },
+          "lang": {
+            "type": "string",
+            "description": "Language code if supported by provider."
+          },
+          "tbs": {
+            "type": "string",
+            "description": "Time filter e.g. qdr:d (day), qdr:w (week), qdr:m (month), qdr:y (year)."
+          },
+          "scrapeMarkdown": {
+            "type": "boolean",
+            "description": "Firecrawl only: include scraped markdown for each result (default true). Parallel returns excerpts."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
       "name": "search_fonts",
       "description": "Search the font catalog the local/headless renderer can load (Google Fonts bundled in-app + locally bundled Chinese foundry faces, source:\"bundled\"). Use when export reports unsupported fonts or when picking fontFamily for motion-graphic items / captions. Returns canonical family names to use verbatim. Substring-matches family AND native-name aliases (case/punctuation-insensitive) — e.g. \"inter\", \"playfair\", \"noto sc\", \"Source Han Sans\", \"Smiley Sans\", \"Douyin Aesthetic Font\". loadable=false means catalogued only; prefer a loadable alternative or confirmFontFallback on export.",
       "input_schema": {
@@ -6179,6 +6504,46 @@
         },
         "required": [
           "query"
+        ]
+      }
+    },
+    {
+      "name": "propose_plan",
+      "description": "Present an executable plan as an editable step list with a Run button. Use this in Plan mode instead of writing a numbered list in prose. Each step is one meaningful operation with its exact target, so the user can edit or delete steps before running them. Do not call this and also repeat the steps as markdown — the card is the plan.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "description": "Ordered steps: { title, detail? }. 3–12 steps is typical; keep each title under ~70 characters.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Short imperative step, e.g. \"Trim the intro to the first beat\"."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Optional specifics: track alias, clip id, frame range, expected result."
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional plan title, e.g. \"Tighten the talking-head cut\"."
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional caveat or prerequisite worth showing above the buttons."
+          }
+        },
+        "required": [
+          "steps"
         ]
       }
     },

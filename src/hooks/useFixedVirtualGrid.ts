@@ -71,6 +71,8 @@ export function useFixedVirtualGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   const [gridWindow, setGridWindow] = useState<GridWindow>(INITIAL_WINDOW);
   const rowStride = rowHeight + rowGap;
+  // Identity of the pinned set, not of the array literal that carries it.
+  const pinnedKey = pinnedIndexes.join(',');
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -122,30 +124,45 @@ export function useFixedVirtualGrid({
     };
   }, [cardWidth, columnGap, fixedColumnCount, itemCount, overscanRows, rowStride]);
 
-  const rowCount = Math.ceil(itemCount / gridWindow.columnCount);
+  // `gridWindow` is the only source of truth for the column count. Everything
+  // that depends on it — row slicing, row tops, total height, the rendered
+  // `gridTemplateColumns` and the scroll height — is derived from this one value,
+  // so they can never disagree.
+  //
+  // Reading the live container width here instead (to shave the one-frame lag)
+  // caused a permanent oscillation: the tile width is computed from this count, so
+  // a wider measurement produced a taller grid, which added a scrollbar, which
+  // narrowed the container, which changed the count again — 3 columns one frame,
+  // 2 the next, forever. The fix for the lag is at the source (see `.cc-media-grid`
+  // `scrollbar-gutter: stable`), not by making this value unstable during render.
+  const columnCount = gridWindow.columnCount;
+  const rowCount = Math.ceil(itemCount / columnCount);
   const totalHeight = rowCount === 0 ? 0 : rowCount * rowStride - rowGap;
   const rows = useMemo(() => {
     const indexes = new Set<number>();
     for (let row = gridWindow.startRow; row < gridWindow.endRow; row += 1) indexes.add(row);
     for (const index of pinnedIndexes) {
-      if (index >= 0 && index < itemCount) indexes.add(Math.floor(index / gridWindow.columnCount));
+      if (index >= 0 && index < itemCount) indexes.add(Math.floor(index / columnCount));
     }
     return [...indexes].sort((a, b) => a - b).map<FixedVirtualRow>((rowIndex) => ({
       rowIndex,
-      startIndex: rowIndex * gridWindow.columnCount,
-      endIndex: Math.min(itemCount, (rowIndex + 1) * gridWindow.columnCount),
+      startIndex: rowIndex * columnCount,
+      endIndex: Math.min(itemCount, (rowIndex + 1) * columnCount),
       top: rowIndex * rowStride,
     }));
-  }, [gridWindow.columnCount, gridWindow.endRow, gridWindow.startRow, itemCount, pinnedIndexes, rowStride]);
+    // `pinnedIndexes` is a fresh array at most call sites, so depending on its
+    // identity rebuilt every row (and remounted the cards) on unrelated parent
+    // renders — the visible flicker. Snapshot it to a string key instead.
+  }, [columnCount, gridWindow.endRow, gridWindow.startRow, itemCount, pinnedKey, rowStride]);
 
   return {
     containerRef,
-    columnCount: gridWindow.columnCount,
-    columnWidth: Math.min(cardWidth, gridWindow.width),
+    columnCount,
+    columnWidth: Math.min(cardWidth, gridWindow.width || cardWidth),
     rowHeight,
     rows,
     totalHeight,
-    visibleStartIndex: gridWindow.startRow * gridWindow.columnCount,
-    visibleEndIndex: Math.min(itemCount, gridWindow.endRow * gridWindow.columnCount),
+    visibleStartIndex: gridWindow.startRow * columnCount,
+    visibleEndIndex: Math.min(itemCount, gridWindow.endRow * columnCount),
   };
 }

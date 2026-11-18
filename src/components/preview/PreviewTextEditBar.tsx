@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../editor/types';
-import { Icon } from '../../modules/icons';
-import { useT } from '../../i18n/locale';
-import {
-  bumpPreviewFontSize,
-  cyclePreviewAlign,
-  cyclePreviewFontWeight,
-  previewTextEditFields,
-} from './previewTextEdit';
+import { previewTextEditFields } from './previewTextEdit';
 import type { PreviewCandidateGeometry } from './previewTransform';
-
-const COLOR_SWATCHES = ['#ffffff', '#0a0a0a', '#FFD84A', '#FF5A5A', '#6EE7F9', '#7CFF9B', '#FF8FD1', '#FFA94D'];
 
 export interface PreviewTextEditBarProps {
   item: TimelineItem;
@@ -24,21 +15,22 @@ export interface PreviewTextEditBarProps {
 }
 
 /**
- * Floating toolbar for a selected text / text-like MG clip.
- * Mirrors caption direct-edit affordances: AI · text · color · size · weight · align.
+ * The inline text editor for a selected text / text-like MG clip.
+ *
+ * This used to also draw a floating row of style buttons over the clip. That
+ * row covered the frame the user was composing and duplicated controls that now
+ * live in the Properties panel, so only the textarea is left — it has to stay
+ * anchored to the selection geometry to line up with the text being edited.
  */
 export function PreviewTextEditBar({
   item,
   selection,
   composition,
   onPropChange,
-  onSeedChat,
   autoEdit,
   onAutoEditHandled,
 }: PreviewTextEditBarProps) {
-  const t = useT();
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const [pop, setPop] = useState<'color' | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const fields = previewTextEditFields(item);
@@ -50,7 +42,6 @@ export function PreviewTextEditBar({
     if (!autoEdit || !fields?.textKey) return;
     setEditing(true);
     setDraft(fields.text);
-    setPop(null);
     onAutoEditHandled?.();
   }, [autoEdit, fields?.text, fields?.textKey, onAutoEditHandled]);
 
@@ -67,157 +58,40 @@ export function PreviewTextEditBar({
     setEditing(false);
   };
 
-  const hasColor = fields.colorKey !== null;
-  const hasSize = fields.fontSizeKey !== null;
   const hasText = fields.textKey !== null;
-  const hasWeight = fields.fontWeightKey !== null;
-  const hasAlign = fields.alignKey !== null;
+
+  // The floating row of buttons (AI / Text / color / size / weight / align) used
+  // to sit on top of the selected clip. It covered the very thing the user was
+  // framing, and duplicated controls that belong in one place — those now live
+  // in the Properties panel. All that remains here is the inline text editor,
+  // which has to be attached to the selection geometry to line up with the text.
+  if (!editing || !hasText) return null;
 
   return (
     <div
-      className="cc-capedit-bar cc-preview-text-edit-bar"
+      className="cc-capedit-bar cc-preview-text-edit-bar is-compact"
       style={{ left, top, transform: 'translate(-50%, calc(-100% - 14px))' }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {onSeedChat && hasText && (
-        <button
-          type="button"
-          className="cc-capedit-btn ai"
-          title={t('Ask AI to rewrite this on-screen text')}
-          onClick={() => onSeedChat(t('Improve this on-screen text (keep layout): "{text}"', { text: fields.text || t('(empty)') }))}
-        >
-          <Icon name="sparkles" size={12} />{t('AI edit')}
-        </button>
-      )}
-
-      {hasText && (
-        <>
-          {onSeedChat && <span className="cc-capedit-divider" aria-hidden />}
-          <button
-            type="button"
-            className={`cc-capedit-btn${editing ? ' on' : ''}`}
-            title={t('Edit text')}
-            onClick={() => {
-              setPop(null);
-              if (!editing) {
-                setDraft(fields.text);
-                setEditing(true);
-              }
-            }}
-          >
-            <Icon name="pencil" size={12} />{t('Text')}
-          </button>
-        </>
-      )}
-
-      {hasColor && (
-        <button
-          type="button"
-          className={`cc-capedit-btn${pop === 'color' ? ' on' : ''}`}
-          title={t('Text color')}
-          onClick={() => setPop(pop === 'color' ? null : 'color')}
-        >
-          <span className="cc-capedit-colordot" style={{ background: fields.color }} />
-        </button>
-      )}
-
-      {hasSize && (
-        <>
-          <span className="cc-capedit-divider" aria-hidden />
-          <button
-            type="button"
-            className="cc-capedit-btn"
-            title={t('Smaller text')}
-            onClick={() => fields.fontSizeKey && onPropChange(item.id, fields.fontSizeKey, bumpPreviewFontSize(fields, -1))}
-          >
-            A−
-          </button>
-          <button
-            type="button"
-            className="cc-capedit-btn"
-            title={t('Bigger text')}
-            onClick={() => fields.fontSizeKey && onPropChange(item.id, fields.fontSizeKey, bumpPreviewFontSize(fields, 1))}
-          >
-            A+
-          </button>
-        </>
-      )}
-
-      {hasWeight && (
-        <>
-          <span className="cc-capedit-divider" aria-hidden />
-          <button
-            type="button"
-            className="cc-capedit-btn"
-            title={t('Font weight')}
-            onClick={() => onPropChange(item.id, fields.fontWeightKey!, cyclePreviewFontWeight(fields.fontWeight))}
-          >
-            {fields.fontWeight >= 900 ? 'B++' : fields.fontWeight >= 700 ? 'B' : 'R'}
-          </button>
-        </>
-      )}
-
-      {hasAlign && (
-        <button
-          type="button"
-          className="cc-capedit-btn"
-          title={t('Align')}
-          onClick={() => onPropChange(item.id, fields.alignKey!, cyclePreviewAlign(fields.align))}
-        >
-          {fields.align === 'left' ? '⫷' : fields.align === 'right' ? '⫸' : '☰'}
-        </button>
-      )}
-
-      {editing && hasText && (
-        <div className="cc-preview-text-edit-draft" onPointerDown={(event) => event.stopPropagation()}>
-          <textarea
-            ref={editorRef}
-            value={draft}
-            rows={2}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                saveText();
-              }
-              if (event.key === 'Escape') {
-                event.stopPropagation();
-                setEditing(false);
-              }
-            }}
-            onBlur={saveText}
-          />
-        </div>
-      )}
-
-      {pop === 'color' && hasColor && (
-        <div className="cc-capedit-pop color">
-          {COLOR_SWATCHES.map((hex) => (
-            <button
-              key={hex}
-              type="button"
-              className={`cc-capedit-swatch${fields.color.toLowerCase() === hex.toLowerCase() ? ' on' : ''}`}
-              style={{ background: hex }}
-              title={hex}
-              onClick={() => {
-                if (fields.colorKey) onPropChange(item.id, fields.colorKey, hex);
-                setPop(null);
-              }}
-            />
-          ))}
-          <label className="cc-capedit-custom" title={t('Custom color')}>
-            <input
-              type="color"
-              defaultValue={/^#[0-9a-fA-F]{6}$/.test(fields.color) ? fields.color : '#ffffff'}
-              onBlur={(event) => {
-                if (fields.colorKey) onPropChange(item.id, fields.colorKey, event.target.value);
-                setPop(null);
-              }}
-            />
-            <span>{t('Custom')}</span>
-          </label>
-        </div>
-      )}
+      <div className="cc-preview-text-edit-draft" onPointerDown={(event) => event.stopPropagation()}>
+        <textarea
+          ref={editorRef}
+          value={draft}
+          rows={2}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              saveText();
+            }
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setEditing(false);
+            }
+          }}
+          onBlur={saveText}
+        />
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { hydratePlugins } from './plugins/store';
 import { initSkins } from './skins';
 import { ensureLocaleDict, getLocale, prefetchLocaleDicts } from './i18n/locale';
 import { recoverDevVitePreload } from './app/vite-preload-recovery';
+import { VaultSetupDialog } from './vault/VaultSetupDialog';
 
 // Kick the active locale's dictionary off FIRST so its fetch overlaps the setup
 // below; the render waits on it so no frame renders untranslated copy. Only
@@ -87,6 +88,9 @@ void localeReady.then(() => {
   createRoot(root).render(
     <StrictMode>
       {isTranscriptWindow ? <TranscriptWindowRoot /> : <App />}
+      {/* First-run only: offers a real folder for projects + media. Mounted at the
+          root so it appears before the user creates anything worth relocating. */}
+      {!isTranscriptWindow && <VaultSetupDialog />}
     </StrictMode>,
   );
   // Warm the other languages only once the first paint is out of the way, so

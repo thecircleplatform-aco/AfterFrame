@@ -9,6 +9,12 @@ const READ_ONLY_TOOL_NAMES = new Set([
   'read_captions', 'read_project', 'read_transcript', 'find_transcript',
   'search_media', 'search_stock_media', 'search_fonts', 'analyze_music', 'inspect_music', 'music_edit_plan', 'music_image_plan',
   'read_agent_artifact', 'browse_local_media',
+  // Web research is read-only: it fetches public pages and returns text. It has
+  // no way to mutate the project, so it must be available in Plan/Ask mode —
+  // "find trending editing styles and propose a plan" is a Plan-mode request by
+  // nature, and gating search behind edit mode would leave the planner unable to
+  // research before proposing anything.
+  'web_search', 'web_browser',
 ]);
 
 const DRAFT_EDIT_TOOL_NAMES = new Set([

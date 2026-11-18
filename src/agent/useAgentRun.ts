@@ -33,6 +33,12 @@ export interface AgentTurn {
   persistentBeforeDoc: ProjectDoc | null;
   /** The run's single change-log row; every landing (imports and, in auto mode, edits) extends it. */
   runSessionId: string | null;
+  /**
+   * Stable id for this user turn. Stamped onto every change session the run
+   * writes, so a rewind can name exactly the edits it takes back instead of
+   * inferring them from list position.
+   */
+  turnId: string;
   /** Auto-apply: timeline edits land after each tool call instead of becoming a proposal. */
   liveEdits: boolean;
   persistentSnapshot: Promise<void>;
@@ -173,7 +179,7 @@ function recordRunSession(
     return;
   }
   const session = createAgentChangeSession(
-    turn.assistantText || RUN_SESSION_PLACEHOLDER, operations, beforeDoc, afterDoc, true,
+    turn.assistantText || RUN_SESSION_PLACEHOLDER, operations, beforeDoc, afterDoc, true, turn.turnId,
   );
   turn.runSessionId = session.id;
   turn.state.setChangeLog((current) => appendAgentChange(current, session));

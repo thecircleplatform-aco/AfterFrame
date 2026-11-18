@@ -66,6 +66,15 @@ const artifactPrefix = (projectId: string, generation: string): string =>
 const terminal = (status: AgentRunStatus) =>
   !['running', 'waiting_approval', 'awaiting_user'].includes(status);
 
+/**
+ * How long an unleased active run must sit untouched before it is presumed dead.
+ *
+ * A live run refreshes its 120s lease every 30s, so 5 minutes is comfortably
+ * past any single missed heartbeat while still recovering a wedged session
+ * without a reload.
+ */
+const ORPHAN_RUN_STALE_MS = 5 * 60_000;
+
 function requireProjectId(projectId: string): void {
   if (!PROJECT_ID.test(projectId)) throw new Error('Invalid agent runtime project id.');
 }
@@ -332,6 +341,63 @@ export async function publishAgentRuntimeSnapshot(snapshot: AgentRuntimeSnapshot
     }
   }));
 }
+/**
+ * Settle active runs that can never finish.
+ *
+ * `startAgentRun` writes the run record (`status: 'running'`) and THEN claims a
+ * lease. If the claim fails, or the tab dies between the two writes, the sidecar
+ * is left with an active run that has no owner and no lease. `recoverInterrupted
+ * AgentRuns` only runs during hydration recovery, and `needsRecovery` there can
+ * skip a run that is preserved as the owner of a proposal — so such a run can
+ * survive indefinitely.
+ *
+ * That matters beyond a stale badge: the composer treats an active run as "busy"
+ * and refuses new sends, and the server keeps an SSE slot for it. The visible
+ * symptom is a chat that stops accepting messages.
+ *
+ * This settles runs that are unambiguously dead: active status, no owner, no
+ * lease, and untouched for `staleAfterMs`. A live run always has a lease (120s,
+ * refreshed every 30s), so it is never swept.
+ */
+export function settleOrphanedAgentRuns(
+  projectId: string,
+  now = Date.now(),
+  staleAfterMs = ORPHAN_RUN_STALE_MS,
+): Promise<number> {
+  return mutate(projectId, (current) => {
+    const orphaned = new Set(current.runs.filter((run) => {
+      if (terminal(run.status)) return false;
+      // A run with an owner+lease may still be alive; leave it to the lease.
+      if (run.ownerInstanceId && run.leaseExpiresAt && run.leaseExpiresAt > now) return false;
+      return now - (run.updatedAt ?? run.createdAt ?? 0) >= staleAfterMs;
+    }).map((run) => run.runId));
+    if (orphaned.size === 0) return [current, 0];
+    const runs = current.runs.map((run) => orphaned.has(run.runId)
+      ? {
+        ...run,
+        status: 'interrupted' as const,
+        updatedAt: now,
+        ownerInstanceId: undefined,
+        leaseToken: undefined,
+        leaseExpiresAt: undefined,
+        finalSummary: run.finalSummary ?? 'Run stopped before it produced a result.',
+      }
+      : run);
+    // Approvals belonging to a swept run would otherwise stay pending forever and
+    // keep re-blocking the composer on the next hydration.
+    const approvals = current.approvals.map((item) =>
+      item.status === 'pending' && orphaned.has(item.runId)
+        ? {
+          ...item,
+          status: 'cancelled' as const,
+          decidedAt: now,
+          summary: item.summary ?? 'Run interrupted before approval could be resolved.',
+        }
+        : item);
+    return [{ ...current, runs, approvals }, orphaned.size];
+  });
+}
+
 export function recoverInterruptedAgentRuns(projectId: string, now = Date.now(),
   preservedRunIds: ReadonlySet<string> = new Set(),
   cancelApprovalRunIds: ReadonlySet<string> = new Set(),

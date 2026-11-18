@@ -71,6 +71,24 @@ function verifyPoliciesAndDetails(): void {
   assert.equal(policyForTool('submit_export').recovery, 'outcome_unknown');
   assert.equal(policyForTool('read_timeline').effect, 'read');
   assert.equal(policyForTool('read_timeline').recovery, 'pure');
+
+  // ensure_dependencies: reading the status is pure; installing writes a binary
+  // to disk, so it must be classified as a persistent local change. If this ever
+  // regresses to 'read' the agent could provision software with no consent step.
+  assert.deepEqual(policyForTool('ensure_dependencies', { action: 'check' }), {
+    effect: 'read',
+    recovery: 'pure',
+  });
+  assert.equal(
+    policyForTool('ensure_dependencies', { action: 'install' }).effect,
+    'persistent_local',
+    'installing a dependency must be a persistent local action',
+  );
+  assert.equal(
+    policyForTool('ensure_dependencies', {}).effect,
+    'read',
+    'a missing action defaults to the read-only check',
+  );
 }
 
 function installTranscriptionProviderStorage(): Record<string, string> {

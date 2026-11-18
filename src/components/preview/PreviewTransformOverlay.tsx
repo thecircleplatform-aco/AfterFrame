@@ -42,6 +42,11 @@ export interface PreviewTransformOverlayProps {
   /** Live text style edits for text / text-like MG clips. */
   onItemPropChange?: (id: string, key: string, value: unknown) => void;
   onSeedChat?: (text: string) => void;
+  /**
+   * Bumped by the Properties panel to open the inline text editor. The floating
+   * edit bar that used to start this is gone, so the outside panel drives it.
+   */
+  textEditRequest?: number;
 }
 
 const DOUBLE_CLICK_MS = 320;
@@ -106,11 +111,19 @@ export function PreviewTransformOverlay({
   onEndHistoryGesture,
   onItemPropChange,
   onSeedChat,
+  textEditRequest = 0,
 }: PreviewTransformOverlayProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState(() => Math.round(playerRef.current?.getCurrentFrame() ?? 0));
   const [previewSize, setPreviewSize] = useState<PreviewSize>({ width: state.width, height: state.height });
   const [textAutoEdit, setTextAutoEdit] = useState(false);
+
+  // The Properties panel is outside this subtree, so it opens the inline editor
+  // by bumping a counter. Ignore the initial 0 so the editor does not open on
+  // its own the first time a text clip is selected.
+  useEffect(() => {
+    if (textEditRequest > 0) setTextAutoEdit(true);
+  }, [textEditRequest]);
   const lastClickRef = useRef<{ id: string; at: number } | null>(null);
   const cycleRef = useRef<ClickCycleState | null>(null);
   const gestureRef = useRef<GestureState | null>(null);

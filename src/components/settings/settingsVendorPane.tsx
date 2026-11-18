@@ -22,6 +22,7 @@ import { XaiOauthVendorPane } from './XaiOauthVendorPane';
 import { VisionModelPane } from './VisionModelPane';
 import { LocalAsrPane } from './LocalAsrPane';
 import { LocalModelPackPane } from './LocalModelPackPane';
+import { TierByokPanel } from './TierByokPane';
 import { SemanticModelPackPane } from './SemanticModelPackPane';
 import { SettingsNoteAction } from './SettingsNoteAction.tsx';
 import {
@@ -209,7 +210,15 @@ function LocalModelsPane({ page, fields, ctx }: {
   page: SettingsVendorPage; fields: readonly SettingsField[]; ctx: FieldCtx;
 }) {
   const t = useT();
-  const title = page.key === 'local/asr' ? 'Local transcription' : page.key === 'local/music/packs' ? 'Beat and music analysis' : 'Visual semantic search';
+  // Title per page: the two model-pack pages, the tier/keys page, and the
+  // semantic-search page all share this "local panel" shell.
+  const title = page.key === 'local/asr'
+    ? 'Local transcription'
+    : page.key === 'local/music/packs'
+      ? 'Beat and music analysis'
+      : page.key === 'plan/tier'
+        ? 'Plans and API keys'
+        : 'Visual semantic search';
   return (
     <div style={pane}>
       <div>
@@ -218,7 +227,9 @@ function LocalModelsPane({ page, fields, ctx }: {
           <b style={{ fontSize: 13 }}>{t(title)}</b>
         </div>
         <div style={{ fontSize: 11.5, color: theme.textDim, marginTop: 3, paddingLeft: 26 }}>
-          {t('Local models install on demand; indexing, transcription and analysis all run on this machine.')}
+          {page.key === 'plan/tier'
+            ? t('Choose how AfterFrame gets its model access. Keys stay on this device in the free tier.')
+            : t('Local models install on demand; indexing, transcription and analysis all run on this machine.')}
         </div>
       </div>
       {page.key === 'local/asr' && <LocalAsrPane fields={fields} ctx={ctx} />}
@@ -227,6 +238,7 @@ function LocalModelsPane({ page, fields, ctx }: {
         title="Beat and music analysis models"
         description="Models are never installed automatically. Once installed, beat and music-embedding analysis runs entirely on this machine." />}
       {page.key === 'local/semantic/setup' && <SemanticModelPackPane />}
+      {page.key === 'plan/tier' && <TierByokPanel />}
     </div>
   );
 }

@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Dashboard } from '../components/Dashboard';
+import { AfterFrameLogo } from '../components/brand/afterframe-logo';
 import type { ProjectDoc } from '../editor/types';
 import { useT } from '../i18n/locale';
 import { loadProjectForEditing, renameProject } from '../persist/projectStore';
 import type { ProjectMeta } from '../persist/projectStoreCoordinators';
-import { theme, themeAlpha } from '../theme';
+import { theme } from '../theme';
 import { emptyProjectDoc, navigateTo, type AppRoute } from './appShell';
 import { editorAccess } from './editorAccess';
 import { EditorErrorBoundary, SecureContextRequiredView } from './EditorGuards';
@@ -12,35 +13,69 @@ import { useDashboardActions } from './useDashboardActions';
 
 const Editor = lazy(() => import('../Editor'));
 
-export function AppSplash({ text, progress }: { text: string; progress?: number }) {
+/**
+ * The preload shown while the editor chunk and project data are still arriving.
+ *
+ * This replaces a bare grey "Loading editor… 44%" line with a 200×3px bar. Two
+ * things were wrong with that: it carried no brand, and a stuck-at-44% counter
+ * reads as broken even when loading is healthy. So:
+ *
+ * - The lockup is the real `AfterFrameLogo`, so the wait still looks like the
+ *   product rather than a browser placeholder.
+ * - The headline names what is actually happening (`stage`), because "Loading"
+ *   is the answer to a question the user did not ask.
+ * - The bar is indeterminate until a real number arrives. A determinate bar that
+ *   sits at 44% is a lie about progress; motion that never claims a position is
+ *   honest. Once `progress` is supplied it eases to that value.
+ * - A short delay before appearing avoids a one-frame white flash on fast loads.
+ */
+export function AppSplash({
+  text, progress, stage,
+}: {
+  text: string;
+  progress?: number;
+  /** What is being worked on right now, e.g. "Restoring your media". */
+  stage?: string;
+}) {
+  const t = useT();
   const pct = progress === undefined ? null : Math.max(0, Math.min(100, Math.round(progress)));
+
+  // Keep the last determinate value so the bar never snaps backwards when a
+  // stage reports a lower number than the previous one.
+  const [ceiling, setCeiling] = useState(0);
+  useEffect(() => {
+    if (pct === null) return;
+    setCeiling((current) => Math.max(current, pct));
+  }, [pct]);
+
   return (
-    <div style={{
-      height: '100vh', display: 'grid', placeItems: 'center', background: theme.bg,
-      color: theme.textDim, fontFamily: 'var(--cc-font)', fontSize: 13,
-    }}>
-      <div style={{ display: 'grid', gap: 12, justifyItems: 'center', width: 200 }}>
-        <span style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.01em' }}>
-          {pct === null ? text : `${text} ${pct}%`}
-        </span>
-        {pct !== null && (
-          <span
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={pct}
-            aria-label={text}
-            style={{
-              display: 'block', width: '100%', height: 3, borderRadius: 999,
-              background: themeAlpha.ink(0.14), overflow: 'hidden',
-            }}
-          >
-            <span style={{
-              display: 'block', height: '100%', width: `${pct}%`, borderRadius: 999,
-              background: theme.text, transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }} />
-          </span>
-        )}
+    <div className="cc-splash" role="status" aria-live="polite" aria-label={text}>
+      <div className="cc-splash-inner">
+        <div className="cc-splash-mark">
+          <AfterFrameLogo size="lg" />
+        </div>
+
+        <p className="cc-splash-headline">{stage ?? text}</p>
+
+        <div
+          className={`cc-splash-track${ceiling === null ? '' : ' is-determined'}`}
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          {...(ceiling > 0 ? { 'aria-valuenow': ceiling } : {})}
+          aria-label={text}
+        >
+          {ceiling > 0 ? (
+            <span className="cc-splash-fill" style={{ width: `${ceiling}%` }} />
+          ) : (
+            <span className="cc-splash-runner" />
+          )}
+        </div>
+
+        <div className="cc-splash-meta">
+          <span className="cc-splash-note">{t('Getting your workspace ready')}</span>
+          {ceiling > 0 && <span className="cc-splash-pct">{ceiling}%</span>}
+        </div>
       </div>
     </div>
   );
@@ -89,7 +124,13 @@ function EditorLoader({ meta, onHome, onRename }: EditorLoaderProps) {
     }, 180);
     return () => window.clearInterval(id);
   }, [load.kind]);
-  if (load.kind === 'loading') return <AppSplash text={t('Loading project…')} progress={Math.min(progress, 38)} />;
+  if (load.kind === 'loading') {
+    return <AppSplash
+      text={t('Loading project…')}
+      stage={t('Restoring your project')}
+      progress={Math.min(progress, 38)}
+    />;
+  }
   if (load.kind === 'unreadable') {
     return (
       <div style={{
@@ -129,7 +170,11 @@ function EditorLoader({ meta, onHome, onRename }: EditorLoaderProps) {
   }
   return (
     <EditorErrorBoundary translate={t} onHome={onHome}>
-      <Suspense fallback={<AppSplash text={t('Loading editor…')} progress={progress} />}>
+      <Suspense fallback={<AppSplash
+        text={t('Loading editor…')}
+        stage={t('Building the timeline')}
+        progress={progress}
+      />}>
         <Editor initial={load.doc} project={meta} onHome={onHome} onRename={onRename} />
       </Suspense>
     </EditorErrorBoundary>

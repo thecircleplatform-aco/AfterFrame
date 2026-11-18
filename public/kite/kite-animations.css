@@ -1,0 +1,13 @@
+/* Placeholder for @kitelus/fly-ui's `@import "../kite/kite-animations.css"`.
+ *
+ * The kit injects its styles through `styleInject()`, i.e. into a runtime
+ * <style> tag. Any `@import` inside that text is resolved by the BROWSER as a
+ * URL against the document origin — not by a bundler — so the relative
+ * "../kite/..." path can never resolve in a built bundle. In production the SPA
+ * catch-all then answered the miss with index.html, and the browser refused it
+ * with "MIME type ('text/html') is not a supported stylesheet".
+ *
+ * No rules are needed here: every @keyframes the kit uses is already inlined in
+ * its own JavaScript, and this file exists only so the @import resolves to an
+ * empty, valid stylesheet instead of logging a console error.
+ */

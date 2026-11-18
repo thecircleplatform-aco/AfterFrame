@@ -12,6 +12,12 @@ export interface RemoteAddress {
 export interface RemoteSession {
   readonly id: string;
   readonly addresses: RemoteAddress[];
+  /**
+   * Public HTTPS route to this session, published by a tunnel. Works off the
+   * local network and gives the secure context that QR scanning and clipboard
+   * need, so the pairing sheet prefers it when present.
+   */
+  readonly publicAddress?: { readonly host: string; readonly url: string };
   readonly expiresAt: number;
   readonly hostAttached: boolean;
   readonly guestCount: number;
@@ -34,6 +40,8 @@ export interface RemoteSnapshot {
 export type RemoteGuestAction =
   | { type: 'prompt'; text: string }
   | { type: 'stop' }
+  | { type: 'watch' }
+  | { type: 'unwatch' }
   | { type: 'image'; name: string; mime: string; url: string };
 
 /** Where a phone-uploaded image lands so the tab can import it as a pool asset. */
@@ -118,6 +126,8 @@ export function streamRemoteActions(
       const parsed = JSON.parse(data) as RemoteGuestAction;
       if (parsed.type === 'prompt' && typeof parsed.text === 'string') onAction(parsed);
       else if (parsed.type === 'stop') onAction(parsed);
+      else if (parsed.type === 'watch') onAction(parsed);
+      else if (parsed.type === 'unwatch') onAction(parsed);
       else if (parsed.type === 'image' && typeof parsed.url === 'string') onAction(parsed);
     } catch {
       // A malformed frame must not kill the channel.

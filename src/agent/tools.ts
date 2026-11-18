@@ -31,6 +31,7 @@ import { LOUDNESS_TOOL_NAMES, LOUDNESS_TOOL_SCHEMAS } from './tools/schemas/loud
 import { ISOLATE_VOICE_TOOL_NAMES, ISOLATE_VOICE_TOOL_SCHEMAS } from './tools/schemas/isolate-voice-tools';
 import { SKILL_TOOL_NAMES, SKILL_TOOL_SCHEMAS } from './tools/schemas/skill-tools';
 import { INSTALL_SKILL_TOOL_NAMES, INSTALL_SKILL_TOOL_SCHEMAS } from './tools/schemas/install-skill-tools';
+import { DEPENDENCY_TOOL_NAMES, DEPENDENCY_TOOL_SCHEMAS } from './tools/schemas/dependency-tools';
 import { RUN_SKILL_SCRIPT_TOOL_NAMES, RUN_SKILL_SCRIPT_TOOL_SCHEMAS } from './tools/schemas/skill-exec-tools';
 import { WATERMARK_TOOL_NAMES, WATERMARK_TOOL_SCHEMAS } from './tools/schemas/watermark-tools';
 import { MARKERS_TOOL_NAMES, MARKERS_TOOL_SCHEMAS } from './tools/schemas/markers-tools';
@@ -40,6 +41,7 @@ import { WEB_TOOL_NAMES, WEB_TOOL_SCHEMAS } from './tools/schemas/web-tools';
 import { FONT_TOOL_NAMES, FONT_TOOL_SCHEMAS } from './tools/schemas/font-tools';
 import { SEARCH_TOOL_NAMES, SEARCH_TOOL_SCHEMAS } from './tools/schemas/search-tools';
 import { FOLLOWUP_TOOL_NAMES, FOLLOWUP_TOOL_SCHEMAS } from './tools/schemas/followup-tools';
+import { PLAN_TOOL_NAMES, PLAN_TOOL_SCHEMAS } from './tools/schemas/plan-tools';
 import { PROJECT_TOOL_NAMES, PROJECT_TOOL_SCHEMAS } from './tools/schemas/project-tools';
 import { UPLOAD_TOOL_NAMES, UPLOAD_TOOL_SCHEMAS } from './tools/schemas/upload-tools';
 import { FRICTION_TOOL_NAMES, FRICTION_TOOL_SCHEMAS } from './tools/schemas/friction-tools';
@@ -74,6 +76,10 @@ import {
   AGENT_RUNTIME_TOOL_NAMES,
   AGENT_RUNTIME_TOOL_SCHEMAS,
 } from './tools/schemas/agent-runtime-tools';
+import {
+  TRANSITION_TOOL_NAMES,
+  TRANSITION_TOOL_SCHEMAS,
+} from './tools/schemas/transition-tools';
 
 // Canonical tool definitions (name / description / JSON input_schema). Each one
 // executes against the EditorCore command layer (tool == command). Vercel AI SDK
@@ -81,6 +87,8 @@ import {
 export const TOOL_SCHEMAS: AgentToolSchema[] = [
   ...CORE_TOOL_SCHEMAS,
   ...AGENT_RUNTIME_TOOL_SCHEMAS,
+  // transition catalog: list_transitions / add_transition / set_transition / remove_transition
+  ...TRANSITION_TOOL_SCHEMAS,
   // transcript / captions / delete-text-=-delete-video (transcribe, find_transcript, clean_script, apply_script, edit_captions)
   ...TRANSCRIPT_TOOL_SCHEMAS,
   // multi-timeline management (manage_timelines: list/create/duplicate/switch/update/delete)
@@ -149,6 +157,8 @@ export const TOOL_SCHEMAS: AgentToolSchema[] = [
   ...SEARCH_TOOL_SCHEMAS,
   // Follow-up questions: render an interactive form card and pause the runtime through __followup.
   ...FOLLOWUP_TOOL_SCHEMAS,
+  // Plan mode: render an editable step list with a Run button (same __followup channel).
+  ...PLAN_TOOL_SCHEMAS,
   // Project session: create/list/delete/duplicate/edit/restore/target_project + get_editor_url
   ...PROJECT_TOOL_SCHEMAS,
   // Verified import session/finalize receipt chain plus media download.
@@ -163,6 +173,8 @@ export const TOOL_SCHEMAS: AgentToolSchema[] = [
   ...PLUGIN_SKILL_TOOL_SCHEMAS,
   // Install a GitHub skill repo into the user skill directory.
   ...INSTALL_SKILL_TOOL_SCHEMAS,
+  // Inspect and provision local tooling (ffmpeg, whisper.cpp, MediaPipe).
+  ...DEPENDENCY_TOOL_SCHEMAS,
   // Run installed-skill scripts locally (whitelisted binaries, skill dir locked).
   ...RUN_SKILL_SCRIPT_TOOL_SCHEMAS,
   // Run skill-provided scripts, FFmpeg, Node, or Python through run_code in an isolated e2b sandbox.
@@ -252,6 +264,7 @@ const EXECUTOR_GROUPS: ReadonlyArray<readonly [ReadonlySet<string>, ToolExecutor
   [ISOLATE_VOICE_TOOL_NAMES, async () => (await import('./tools/isolate-voice-tools')).execIsolateVoiceTool],
   [SKILL_TOOL_NAMES, async () => (await import('./tools/skill-tools')).execSkillTool],
   [INSTALL_SKILL_TOOL_NAMES, async () => (await import('./tools/install-skill-tools')).execInstallSkillTool],
+  [DEPENDENCY_TOOL_NAMES, async () => (await import('./tools/dependency-tools')).execDependencyTool],
   [RUN_SKILL_SCRIPT_TOOL_NAMES, async () => (await import('./tools/skill-exec-tools')).execRunSkillScriptTool],
   [WATERMARK_TOOL_NAMES, async () => (await import('./tools/watermark-tools')).execWatermarkTool],
   [MARKERS_TOOL_NAMES, async () => (await import('./tools/markers-tools')).execMarkersTool],
@@ -261,6 +274,7 @@ const EXECUTOR_GROUPS: ReadonlyArray<readonly [ReadonlySet<string>, ToolExecutor
   [FONT_TOOL_NAMES, async () => (await import('./tools/font-tools')).execFontTool],
   [SEARCH_TOOL_NAMES, async () => (await import('./tools/search-tools')).execSearchTool],
   [FOLLOWUP_TOOL_NAMES, async () => (await import('./tools/followup-tools')).execFollowupTool],
+  [PLAN_TOOL_NAMES, async () => (await import('./tools/plan-tools')).execPlanTool],
   [PROJECT_TOOL_NAMES, async () => (await import('./tools/project-tools')).execProjectTool],
   [UPLOAD_TOOL_NAMES, async () => (await import('./tools/upload-tools')).execUploadTool],
   [FRICTION_TOOL_NAMES, async () => (await import('./tools/friction-tools')).execFrictionTool],
@@ -295,6 +309,7 @@ const EXECUTOR_GROUPS: ReadonlyArray<readonly [ReadonlySet<string>, ToolExecutor
   [AGENT_RUNTIME_TOOL_NAMES, async () => (
     await import('./tools/agent-runtime-tools')
   ).execAgentRuntimeTool],
+  [TRANSITION_TOOL_NAMES, async () => (await import('./tools/transition-tools')).execTransitionTool],
 ];
 
 const EXECUTOR_BY_NAME = new Map<string, ToolExecutorLoader>();

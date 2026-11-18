@@ -58,6 +58,36 @@ function useMediaGridWindow(props: Pick<MediaPoolGridProps, 'entries' | 'view' |
   const [focusedAssetId, setFocusedAssetId] = useState<string | null>(null);
   const [focusedFolderId, setFocusedFolderId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Tile width follows the pane instead of a fixed 104px. A phone-width sheet
+  // fits three 104px tiles and leaves a dead gutter, which read as a cramped,
+  // misaligned grid; aiming at ~3 comfortable columns keeps the rows full and
+  // the thumbs the same size at any width.
+  const [cardWidth, setCardWidth] = useState(104);
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const measuredWidth = useRef(0);
+  useEffect(() => {
+    const node = measureRef.current;
+    if (!node) return;
+    const measure = () => {
+      const width = node.clientWidth;
+      // Only react to real container resizes. Re-laying out to a new cardWidth
+      // changes the content height, which fires the observer again — comparing
+      // against the last measured width is what stops that feedback loop.
+      if (!width || width === measuredWidth.current) return;
+      measuredWidth.current = width;
+      const gap = 12;
+      const target = Math.round((width - gap * 2) / 3);
+      setCardWidth((current) => {
+        const next = Math.min(132, Math.max(88, target));
+        return next === current ? current : next;
+      });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const activePreviewId = focusedAssetId ?? pointerId;
   const pinnedIndexes = useMemo(() => {
     const ids = new Set([props.assetMenu, activePreviewId, draggedId].filter((id): id is string => id != null));
@@ -69,8 +99,15 @@ function useMediaGridWindow(props: Pick<MediaPoolGridProps, 'entries' | 'view' |
   }, [activePreviewId, draggedId, focusedFolderId, props.assetMenu, props.entries, props.selected]);
   const grid = useFixedVirtualGrid({
     itemCount: props.entries.length,
-    cardWidth: props.view === 'grid' ? 104 : 1,
-    rowHeight: props.view === 'grid' ? 104 : 28,
+    cardWidth: props.view === 'grid' ? cardWidth : 1,
+    // Thumb is 16:9 (= cardWidth * 0.5625), then the name label sits under it.
+    // Folder labels can wrap to two lines, so the row needs room for the taller
+    // of the two: 2 * 1.25em at 12px plus the 7px top padding and a few px of
+    // slack. A flat `cardWidth * 0.86` was ~8px short of that and clipped the
+    // label on every tile.
+    rowHeight: props.view === 'grid'
+      ? Math.round(cardWidth * 0.5625 + 42)
+      : 28,
     columnGap: props.view === 'grid' ? 12 : 0,
     rowGap: props.view === 'grid' ? 12 : 0,
     overscanRows: 2,
@@ -86,7 +123,7 @@ function useMediaGridWindow(props: Pick<MediaPoolGridProps, 'entries' | 'view' |
     if (focusedAssetId && !props.entries.some((entry) => entry.kind === 'asset' && entry.asset.id === focusedAssetId)) setFocusedAssetId(null);
     if (focusedFolderId && !props.entries.some((entry) => entry.kind === 'folder' && entry.folder.id === focusedFolderId)) setFocusedFolderId(null);
   }, [focusedAssetId, focusedFolderId, props.entries]);
-  return { activePreviewId, grid, setPointerId, setFocusedAssetId, setFocusedFolderId, setDraggedId };
+  return { activePreviewId, grid, measureRef, setPointerId, setFocusedAssetId, setFocusedFolderId, setDraggedId };
 }
 
 export function MediaPoolGrid(props: MediaPoolGridProps) {
@@ -148,7 +185,10 @@ export function MediaPoolGrid(props: MediaPoolGridProps) {
   })();
   return (
     <div
-      ref={gridRef}
+      ref={(node) => {
+        gridRef.current = node;
+        windowState.measureRef.current = node;
+      }}
       className={`cc-media-grid ${props.view}${marquee ? ' is-marquee-selecting' : ''}`}
       onPointerDown={startMarquee}
       onPointerMove={moveMarquee}

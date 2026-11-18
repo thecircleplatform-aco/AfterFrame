@@ -11,6 +11,15 @@
  *   look-alike built by configuring Iosevka — https://github.com/ahatem/IoskeleyMono).
  * Chinese glyphs are not covered and fall back to the system UI stack
  * (PingFang / Microsoft YaHei) via the trailing system-ui entries. */
+
+/* Inter is what @kitelus/fly-ui expects for its own components. The kit injects
+ * `@import "@fontsource-variable/inter"` into a runtime <style> tag, which the
+ * browser resolves as a URL against our origin and 404s in production (the SPA
+ * rewrite then answers it with index.html, so the CSS is refused as text/html).
+ * Importing the real font here — through Vite, which rewrites it to a bundled
+ * asset — satisfies the family name so the kit renders correctly. */
+@import '@fontsource-variable/inter';
+
 @font-face {
   font-family: 'Plus Jakarta Sans';
   src: url('/fonts/PlusJakartaSans-Variable.woff2') format('woff2');
@@ -741,6 +750,179 @@ button, input, select { font: inherit; }
 .cc-chat-composer-bar-tools {
   display:flex; align-items:center; gap:0; flex:1 1 auto; min-width:0;
 }
+/* ── Question stepper ────────────────────────────────────────────────────────
+   Docked directly above the composer so a 12-question card never has to be
+   scrolled back to. One question at a time, with per-step free text. */
+.cc-qstep {
+  position:relative; margin:0 0 6px; padding:10px 12px 9px;
+  border-radius:12px; border:0;
+  /* Scroll the question body rather than growing past the panel. Capped in
+     viewport units so a short editor window still shows the input row. */
+  display:flex; flex-direction:column; min-height:0;
+  max-height:min(56vh, 400px);
+  background:rgba(var(--cc-ink-rgb),.07);
+  -webkit-backdrop-filter:blur(14px) saturate(1.4);
+  backdrop-filter:blur(14px) saturate(1.4);
+  box-shadow:inset 0 1px 0 rgba(var(--cc-ink-rgb),.06);
+  color:var(--cc-text);
+  animation:cc-qstep-in .18s ease-out both;
+}
+@keyframes cc-qstep-in {
+  from { opacity:0; transform:translateY(6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.cc-qstep-head {
+  display:flex; align-items:center; gap:8px; min-width:0; flex:0 0 auto;
+}
+.cc-qstep-count {
+  flex:0 0 auto; display:inline-flex; align-items:baseline; gap:1px;
+  font-size:10px; font-weight:600; letter-spacing:.03em;
+  font-variant-numeric:tabular-nums; color:var(--cc-text-muted);
+  padding:2px 7px; border-radius:999px; background:rgba(var(--cc-ink-rgb),.08);
+}
+.cc-qstep-count b { font-size:11.5px; color:var(--cc-text); font-weight:700; }
+.cc-qstep-title {
+  flex:1 1 auto; min-width:0; font-size:12.5px; font-weight:600;
+  line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cc-qstep-timer {
+  flex:0 0 auto; display:inline-flex; align-items:center; gap:3px;
+  font-size:10.5px; font-variant-numeric:tabular-nums;
+  color:var(--cc-text-muted); transition:color .2s ease;
+}
+.cc-qstep-timer.is-urgent { color:#e2725b; }
+.cc-qstep-cancel {
+  flex:0 0 auto; width:22px; height:22px; display:grid; place-items:center;
+  padding:0; border:0; border-radius:999px; background:transparent;
+  color:var(--cc-text-muted); cursor:pointer;
+  transition:background .12s ease, color .12s ease;
+}
+.cc-qstep-cancel:hover { background:rgba(var(--cc-ink-rgb),.12); color:var(--cc-text); }
+.cc-qstep-cancel:focus-visible { outline:1.5px solid var(--cc-accent); outline-offset:1px; }
+.cc-qstep-progress {
+  position:relative; height:2.5px; margin:8px 0 9px;
+  border-radius:999px; background:rgba(var(--cc-ink-rgb),.1); overflow:hidden;
+}
+.cc-qstep-progress > span {
+  display:block; height:100%; border-radius:999px;
+  background:var(--cc-accent);
+  transition:width .22s cubic-bezier(.4,0,.2,1);
+}
+.cc-qstep-body {
+  display:flex; flex-direction:column; gap:7px; min-width:0;
+  flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+  scrollbar-width:thin; scrollbar-color:rgba(var(--cc-ink-rgb),.22) transparent;
+}
+.cc-qstep-body::-webkit-scrollbar { width:5px; }
+.cc-qstep-body::-webkit-scrollbar-thumb {
+  background:rgba(var(--cc-ink-rgb),.22); border-radius:999px;
+}
+.cc-qstep-label {
+  font-size:12.5px; font-weight:600; line-height:1.3; min-width:0;
+  overflow-wrap:anywhere;
+}
+.cc-qstep-req { color:#e2725b; margin-left:2px; }
+.cc-qstep-desc {
+  font-size:11px; line-height:1.35; color:var(--cc-text-muted);
+  overflow-wrap:anywhere;
+}
+.cc-qstep-options {
+  display:flex; flex-direction:column; flex-wrap:nowrap; gap:4px;
+  flex:0 0 auto;
+  padding:1px; margin:0 -1px;
+  scrollbar-width:thin; scrollbar-color:rgba(var(--cc-ink-rgb),.22) transparent;
+}
+.cc-qstep-option {
+  display:flex; align-items:flex-start; gap:7px;
+  width:100%; max-width:100%; box-sizing:border-box;
+  flex:0 0 auto; padding:6px 9px; border:0; border-radius:9px;
+  background:rgba(var(--cc-ink-rgb),.07); color:var(--cc-text);
+  font:inherit; font-size:11.5px; line-height:1.3; text-align:left;
+  cursor:pointer; transition:background .12s ease, color .12s ease;
+}
+.cc-qstep-option:hover { background:rgba(var(--cc-ink-rgb),.14); }
+.cc-qstep-option.is-on {
+  background:color-mix(in srgb, var(--cc-accent) 26%, transparent);
+  color:var(--cc-text); font-weight:600;
+}
+.cc-qstep-option:focus-visible { outline:1.5px solid var(--cc-accent); outline-offset:1px; }
+.cc-qstep-mark {
+  flex:0 0 auto; width:13px; height:13px; margin-top:1px;
+  display:grid; place-items:center; border-radius:50%;
+  border:1.5px solid rgba(var(--cc-ink-rgb),.34); background:transparent;
+  transition:border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.cc-qstep-mark.is-box { border-radius:4px; }
+.cc-qstep-option.is-on .cc-qstep-mark {
+  border-color:var(--cc-accent); background:var(--cc-accent);
+  box-shadow:inset 0 0 0 2.5px var(--cc-bg, transparent);
+}
+.cc-qstep-rich-copy {
+  display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 auto;
+}
+.cc-qstep-rich-name {
+  font-size:11.5px; font-weight:600; line-height:1.25; overflow-wrap:anywhere;
+}
+.cc-qstep-rich-desc {
+  font-size:10.5px; font-weight:400; line-height:1.35;
+  color:var(--cc-text-muted); overflow-wrap:anywhere;
+}
+.cc-qstep-input {
+  width:100%; box-sizing:border-box; min-height:32px; max-height:96px;
+  resize:vertical; padding:7px 9px; border:0; border-radius:9px;
+  background:rgba(var(--cc-ink-rgb),.09); color:var(--cc-text);
+  font:inherit; font-size:11.5px; line-height:1.35;
+}
+.cc-qstep-input::placeholder { color:var(--cc-text-muted); }
+.cc-qstep-input:focus { outline:1.5px solid var(--cc-accent); outline-offset:-1px; }
+.cc-qstep-input:disabled { opacity:.55; cursor:not-allowed; }
+.cc-qstep-foot {
+  display:flex; align-items:center; gap:6px; margin-top:9px; min-width:0;
+  flex:0 0 auto;
+}
+.cc-qstep-tally {
+  flex:1 1 auto; min-width:0; font-size:10.5px; color:var(--cc-text-muted);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cc-qstep-ghost {
+  flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:4px;
+  padding:5px 11px; border:0; border-radius:999px; white-space:nowrap;
+  background:rgba(var(--cc-ink-rgb),.09); color:var(--cc-text-muted);
+  font:inherit; font-size:11.5px; font-weight:500; line-height:1.4; cursor:pointer;
+  transition:background .12s ease, color .12s ease;
+}
+.cc-qstep-ghost:hover { background:rgba(var(--cc-ink-rgb),.16); color:var(--cc-text); }
+.cc-qstep-ghost:disabled { opacity:.4; cursor:not-allowed; }
+.cc-qstep-ghost:focus-visible { outline:1.5px solid var(--cc-accent); outline-offset:1px; }
+.cc-qstep-primary {
+  flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:4px;
+  min-width:58px; padding:5px 14px; border:0; border-radius:999px; white-space:nowrap;
+  background:var(--cc-accent); color:var(--cc-on-accent);
+  font:inherit; font-size:11.5px; font-weight:600; line-height:1.4; cursor:pointer;
+  transition:filter .12s ease, opacity .12s ease;
+}
+.cc-qstep-primary > svg { flex:0 0 auto; pointer-events:none; }
+.cc-qstep-ghost > svg { flex:0 0 auto; pointer-events:none; opacity:.7; }
+.cc-qstep-primary:hover { filter:brightness(1.08); }
+.cc-qstep-primary:disabled { opacity:.35; cursor:not-allowed; filter:none; }
+.cc-qstep-primary:focus-visible { outline:1.5px solid var(--cc-text); outline-offset:1px; }
+@media (max-width:420px) {
+  .cc-qstep { padding:9px 10px 8px; }
+  .cc-qstep-title { font-size:12px; }
+  .cc-qstep-options { max-height:140px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .cc-qstep { animation:none; }
+  .cc-qstep-progress > span { transition:none; }
+}
+/* Pointer left in the transcript where the widget form used to be rendered.
+   The live form lives in the stepper above the composer. */
+.cc-widget-docked {
+  display:flex; align-items:center; gap:6px; margin:8px 0; padding:6px 10px;
+  border-radius:9px; background:rgba(var(--cc-ink-rgb),.06);
+  font-size:11px; line-height:1.35; color:var(--cc-text-muted);
+}
+.cc-widget-docked svg { flex:0 0 auto; opacity:.75; }
 /* Agent mode mark: animated Brain from @animateicons/react, aligned with the
    15px icons around it. The pack owns its own motion, so no CSS animation. */
 .cc-agent-brain-mark {
@@ -1047,7 +1229,10 @@ button, input, select { font: inherit; }
 }
 
 /* Editor asset panel. */
-.cc-library-panel { display:flex; flex-direction:column; height:100%; min-height:0; overflow:hidden; background:var(--cc-panel); border-right:0.5px solid var(--cc-border); container:library-panel / inline-size; font-family:var(--cc-font); }
+/* Inside the sheet the panel is a pane of one larger surface, not a column with
+   its own frame. The right border only makes sense in the old side-by-side grid
+   layout; here it drew a vertical seam down the middle of the sheet. */
+.cc-library-panel { display:flex; flex-direction:column; height:100%; min-height:0; overflow:hidden; background:transparent; border:0; container:library-panel / inline-size; font-family:var(--cc-font); }
 /* Bottom dock for the library panel's top-level areas. Icon over label, pills
    that scroll sideways without a visible scrollbar (CapCut-style).
 
@@ -1100,16 +1285,42 @@ button, input, select { font: inherit; }
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* Sits directly on top of the dock, which is now permanently visible and acts
+     as the section switcher. Before, the dock slid out of the way and the sheet
+     could occupy `bottom: 0`. */
+  bottom: var(--cc-dock-h, 58px);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-top: 0.5px solid var(--cc-border);
+  border: 0.5px solid var(--cc-border);
+  border-bottom: 0;
   border-radius: 16px 16px 0 0;
   background: var(--cc-panel);
   box-shadow: 0 -18px 44px rgba(var(--cc-shadow-rgb), .45);
   overflow: hidden;
 }
+/* Fullscreen is portalled to <body>, so it is no longer inside the dock host's
+   z-index 60 stacking context. The offsets are reset explicitly because the base
+   rule pins the sheet above the dock (`bottom: var(--cc-dock-h)`), which would
+   otherwise leave a strip of the bar showing under a "fullscreen" panel. */
+.cc-library-sheet.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  bottom: 0;
+  z-index: 120;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Nothing to resize when it already fills the screen; keep the strip only as the
+   double-click target that drops back out. */
+.cc-library-sheet.is-fullscreen .cc-library-sheet-grip {
+  cursor: pointer;
+  opacity: .5;
+}
+.cc-library-sheet.is-fullscreen .cc-library-sheet-grip:active { cursor: pointer; }
 /* Drag handle: the sheet's height is driven by the pointer (and by arrow keys
    when it has focus), so the pill has to look grabbable and stop the browser
    from turning the gesture into a scroll. */
@@ -1129,62 +1340,471 @@ button, input, select { font: inherit; }
   width: 34px;
   height: 3px;
   border-radius: 999px;
-  background: var(--cc-line-grad);
+  background: var(--cc-border);
   opacity: .75;
   transition: opacity .15s ease, width .15s ease;
 }
 .cc-library-sheet-grip:hover::before,
 .cc-library-sheet-grip:focus-visible::before { opacity: 1; width: 50px; }
-/* Header: a compact capsule floating inside the sheet instead of a full-bleed
-   bar — a 45px row for one glyph and a label is a lot of a thumb-sized surface.
-   The ramp comes from a masked ring (border-image would square the capsule). */
+/* Header: back button on the left, search pill filling the middle, all one
+   seamless glass unit — no separate outlines, no capsule ring, no divider under
+   it. Every element in here is borderless so the row reads as a single bar
+   floating on the sheet rather than a set of framed controls. */
 .cc-library-sheet-head {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   flex: 0 0 auto;
-  min-height: 28px;
-  margin: 0 10px;
-  padding: 2px 12px 2px 2px;
-  border-radius: 999px;
-  background: rgba(var(--cc-ink-rgb), .045);
+  min-height: 36px;
+  margin: 0 8px 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
 }
-.cc-library-sheet-head::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  padding: .5px;
-  border-radius: inherit;
-  background: var(--cc-line-grad);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  opacity: .7;
-  pointer-events: none;
-}
+/* Glass back button: a soft translucent disc, no hard edge. */
 .cc-library-sheet-back {
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .07);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  color: var(--cc-text);
+  cursor: pointer;
+  transform: rotate(90deg);
+  transition: background 140ms ease, transform 140ms ease;
+}
+.cc-library-sheet-back:hover,
+.cc-library-sheet-back:focus-visible {
+  background: rgba(var(--cc-ink-rgb), .14);
+  outline: none;
+}
+.cc-library-sheet-back:active { transform: rotate(90deg) scale(.94); }
+/* Search: the glass surface for the whole centre. The native <input> is stripped
+   back to bare text so nothing inside the pill draws its own box — Chrome's
+   default `type=search` field is what produced the stray grey rectangle. */
+.cc-library-sheet-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .07);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  color: var(--cc-text-dim);
+  cursor: text;
+  transition: background 140ms ease;
+}
+.cc-library-sheet-search:focus-within { background: rgba(var(--cc-ink-rgb), .12); }
+.cc-library-sheet-search > svg { flex: 0 0 auto; opacity: .72; }
+.cc-library-sheet-search input,
+.cc-library-sheet-search input[type='search'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
+  color: var(--cc-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+.cc-library-sheet-search input::placeholder { color: var(--cc-text-dim); opacity: .75; }
+.cc-library-sheet-search input::-webkit-search-decoration,
+.cc-library-sheet-search input::-webkit-search-cancel-button,
+.cc-library-sheet-search input::-webkit-search-results-button,
+.cc-library-sheet-search input::-webkit-search-results-decoration { -webkit-appearance: none; }
+/* Clear button matches the glass family: borderless, no fill until touched. */
+.cc-library-sheet-search-clear {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .12);
+  color: var(--cc-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.cc-library-sheet-search-clear:hover { background: rgba(var(--cc-ink-rgb), .22); color: var(--cc-text); }
+/* Filter button in the header's right corner: same glass disc family as the
+   back button, with a count badge when filters are narrowing the list. */
+.cc-library-sheet-filter {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .07);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  color: var(--cc-text);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.cc-library-sheet-filter:hover,
+.cc-library-sheet-filter:focus-visible { background: rgba(var(--cc-ink-rgb), .14); outline: none; }
+.cc-library-sheet-filter.is-open { background: color-mix(in srgb, var(--cc-accent) 22%, transparent); }
+.cc-library-sheet-filter-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--cc-accent);
+  color: var(--cc-panel);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+.cc-library-sheet-title { font-size: 12px; font-weight: 650; letter-spacing: .01em; color: var(--cc-text); }
+/* Agent panel: the animated agent mark sits where the section title used to, so
+   the header still reads as one line with the back disc on the left. */
+.cc-agent-brand {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+/* A comet ring orbiting a brand-tinted brain. Three layers, no JS:
+   - the core is a conic brand gradient with the brain knocked out on top
+   - the ring is a hairline circle that slowly rotates
+   - both breathe together so the mark never sits perfectly still */
+.cc-agent-orbit {
+  position: relative;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+.cc-agent-orbit-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--brand-pink) 60deg,
+    var(--brand-blue) 140deg,
+    var(--brand-purple) 220deg,
+    transparent 320deg
+  );
+  /* Knock the middle out so it reads as a ring, not a disc. */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  animation: cc-agent-orbit-spin 3.2s linear infinite;
+  will-change: transform;
+}
+.cc-agent-orbit-core {
+  position: relative;
+  z-index: 1;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  /* The glyph is stroked with currentColor, so paint the spectrum into the
+     background and lift it through a mask-free solid fill. */
+  color: var(--cc-text);
+  animation: cc-agent-core-pulse 2.6s cubic-bezier(.45,.05,.55,.95) infinite;
+  will-change: transform, opacity;
+}
+/* Soft halo behind the mark, tinted with the same spectrum. */
+.cc-agent-orbit::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--brand-gradient);
+  opacity: .28;
+  filter: blur(5px);
+  animation: cc-agent-halo 4.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+.cc-agent-orbit-core svg { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--brand-purple) 55%, transparent)); }
+.cc-agent-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: .005em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Brand spectrum in the text itself, clipped to the glyphs. */
+  background-image: var(--brand-gradient);
+  background-size: 220% 220%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cc-agent-title-flow 7s cubic-bezier(.45,.05,.55,.95) infinite;
+}
+@keyframes cc-agent-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes cc-agent-core-pulse {
+  0%, 100% { transform: scale(1); opacity: .92; }
+  50% { transform: scale(1.09); opacity: 1; }
+}
+@keyframes cc-agent-halo {
+  0%, 100% { opacity: .18; transform: scale(.92); }
+  50% { opacity: .36; transform: scale(1.06); }
+}
+@keyframes cc-agent-title-flow {
+  0%   { background-position: 0% 46%; }
+  50%  { background-position: 100% 54%; }
+  100% { background-position: 0% 46%; }
+}
+/* Respect reduced-motion: keep the mark readable, drop every loop. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-agent-orbit-ring,
+  .cc-agent-orbit-core,
+  .cc-agent-orbit::before,
+  .cc-agent-title { animation: none; }
+  .cc-agent-orbit::before { opacity: .24; }
+  .cc-agent-title { background-position: 45% 50%; }
+}
+/* Right-hand control cluster: notifications / full screen / menu on ONE line.
+   These were previously unstyled <button>s, so the browser painted its default
+   `2px outset` chrome with a grey face and a drop shadow behind each one. */
+.cc-agent-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Positioning context only — no background, no border, no shadow. */
+.cc-agent-head-popover {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.cc-agent-head-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: var(--cc-text);
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
+  color: var(--cc-text-dim);
   cursor: pointer;
-  transform: rotate(90deg);
+  transition: background 140ms ease, color 140ms ease;
 }
-.cc-library-sheet-back:hover { background: var(--cc-hover); }
-.cc-library-sheet-title { font-size: 12px; font-weight: 650; letter-spacing: .01em; color: var(--cc-text); }
-.cc-library-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; outline: none; }
+.cc-agent-head-btn:hover,
+.cc-agent-head-btn:focus-visible {
+  background: rgba(var(--cc-ink-rgb), .09);
+  color: var(--cc-text);
+  outline: none;
+}
+.cc-agent-head-btn.is-on {
+  background: color-mix(in srgb, var(--cc-accent) 20%, transparent);
+  color: var(--cc-accent);
+}
+/* Unread count on the bell. */
+.cc-agent-head-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 12px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--cc-accent);
+  color: var(--cc-panel);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* Popovers dropped below the cluster. This is the panel that used to draw the
+   unwanted box behind the three controls; it only appears when opened. */
+.cc-agent-head-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+  border: 0.5px solid var(--cc-border);
+  border-radius: 9px;
+  background: var(--cc-panel-alt);
+  box-shadow: 0 12px 32px rgba(var(--cc-shadow-rgb), .5);
+  /* Never let the popover collapse to the width of the bell button — it is
+     anchored to a 28px control in a narrow header cluster, and a shrink-to-fit
+     width made every word wrap onto its own line. */
+  width: min(300px, calc(100vw - 24px));
+  box-sizing: border-box;
+  /* The bell sits ~26px from the sheet's right edge, so `right: 0` would hang a
+     300px popover past the left edge of a narrow sheet. Pulling it back by that
+     inset keeps it inside the header. */
+  transform: translateX(42px);
+}
+.cc-agent-head-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cc-text-muted);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cc-agent-head-menu > button:hover:not(:disabled) { background: var(--cc-hover); color: var(--cc-text); }
+.cc-agent-head-menu > button:disabled { opacity: .42; cursor: default; }
+.cc-agent-head-live {
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--cc-accent);
+}
+.cc-agent-head-empty,
+.cc-agent-head-note {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--cc-text-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+/* Setup advisories (e.g. unconfigured tools) live in the bell popover rather
+   than a full-width banner, so they no longer steal conversation height. */
+.cc-agent-head-notice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 22px 7px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cc-accent) 10%, transparent);
+  animation: cc-agent-notice-in 180ms ease-out both;
+}
+@keyframes cc-agent-notice-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-agent-head-notice-body { flex: 1 1 auto; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
+.cc-agent-head-notice-title {
+  margin: 0;
+  color: var(--cc-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+.cc-agent-head-notice-detail {
+  margin: 0;
+  color: var(--cc-text-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.cc-agent-head-notice-action {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  /* `--cc-accent` is white in this theme, so the label takes the panel colour
+     like the bell badge does, or the text disappears into the fill. */
+  background: var(--cc-accent);
+  color: var(--cc-panel);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.cc-agent-head-notice-action:hover { filter: brightness(1.08); }
+.cc-agent-head-notice-close {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cc-text-dim);
+  cursor: pointer;
+}
+.cc-agent-head-notice-close:hover { background: var(--cc-hover); color: var(--cc-text); }
+.cc-agent-head-notice-action:focus-visible,
+.cc-agent-head-notice-close:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-agent-head-notice { animation: none; }
+}
+.cc-library-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; outline: none; border: 0; }
 /* Agent section: the chat keeps its own header/composer and simply fills the
    sheet, so no extra chrome is added between the grabber and the panel. */
 .cc-agent-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.cc-agent-panel > .cc-library-sheet-body { padding-top: 2px; }
+/* No top padding: the chat should start right under the header with no seam of
+   sheet background showing through. */
+.cc-agent-panel > .cc-library-sheet-body { padding-top: 0; }
+/* In the bottom sheet the chat IS the surface: it must not draw its own rounded
+   frame inside the sheet's frame. That meant not just clearing `border` (which
+   only removed the 0.5px separator) but also the two decorative pseudo-elements:
+   `::after` is the 1.25px gradient rim, and `::before` is the blurred colour
+   mist behind it. Both are inset/outset by a few px, so leaving them on drew a
+   rounded box hovering inside the sheet with a gap on every side. */
 .cc-agent-panel .cc-chat-panel { border: 0; border-radius: 0; }
+.cc-agent-panel .cc-chat-panel::before,
+.cc-agent-panel .cc-chat-panel::after { content: none; animation: none; }
 /* The panel sizes itself with `height:100%` in its old grid column; inside a
    flex row that collapsed it to 1px wide, so give it the whole slot explicitly. */
 .cc-library-sheet-body > * { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; height: 100%; }
@@ -1221,6 +1841,16 @@ button, input, select { font: inherit; }
   background: color-mix(in srgb, var(--cc-accent) 14%, transparent);
 }
 .cc-dock-item.selected .cc-dock-icon { color: var(--cc-accent); }
+/* Separates the standalone sections from the Library family, which is laid out
+   as its own run of equally-weighted, fully labelled entries. */
+.cc-dock-sep {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 9px 4px;
+  border-radius: 1px;
+  background: var(--cc-border);
+}
 @media (prefers-reduced-motion: reduce) {
   .cc-dock-item { transition: none; }
 }
@@ -1430,7 +2060,7 @@ button, input, select { font: inherit; }
 .cc-live-thumb.is-playing .cc-live-thumb-canvas { opacity:1; }
 .cc-live-thumb.is-playing .cc-live-thumb-still { opacity:0; }
 
-.cc-media-pool { position:relative; display:flex; flex:1; min-height:0; flex-direction:column; overflow:hidden; padding:9px 7px 0 12px; background:var(--cc-panel); color:var(--cc-text); }
+.cc-media-pool { position:relative; display:flex; flex:1; min-height:0; flex-direction:column; overflow:hidden; padding:9px 7px 0 12px; background:transparent; color:var(--cc-text); border:0; }
 .cc-media-toolbar { position:relative; z-index:5; display:flex; align-items:center; gap:4px; margin-bottom:10px; }
 .cc-media-search { height:24px; min-width:0; flex:1; display:flex; align-items:center; gap:0; margin-right:5px; padding:0 0 0 7px; border:0.5px solid var(--cc-border); border-radius:4px; background:var(--cc-panel); color:var(--cc-text-dim); }
 @container library-panel (max-width:320px) {
@@ -1461,8 +2091,13 @@ button, input, select { font: inherit; }
 .cc-media-status, .cc-media-error { margin:-5px 0 8px; font-size:11px; }
 .cc-media-status { color:var(--cc-text-dim); }
 .cc-media-error { color:#e27f75; }
-.cc-media-export-guide { margin:-4px 0 9px; padding:6px 8px; border:0.5px solid var(--cc-border); border-radius:5px; background:var(--cc-panel-alt); color:var(--cc-text-dim); font-size:10.5px; line-height:1.45; }
-.cc-media-grid { position:relative; flex:1; min-height:0; overflow-y:auto; padding:0 0 28px; }
+.cc-media-export-guide { margin:-4px 0 7px; color:var(--cc-text-dim); font-size:10.5px; line-height:1.45; }
+.cc-media-export-guide > summary { cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:4px; padding:2px 0; color:var(--cc-text-dim); }
+.cc-media-export-guide > summary::-webkit-details-marker { display:none; }
+.cc-media-export-guide > summary::before { content:'?'; display:inline-grid; place-items:center; width:13px; height:13px; border:0.5px solid var(--cc-border); border-radius:50%; font-size:8.5px; line-height:1; }
+.cc-media-export-guide > summary:hover { color:var(--cc-text); }
+.cc-media-export-guide > p { margin:3px 0 0; padding:6px 8px; border-radius:5px; background:var(--cc-panel-alt); }
+.cc-media-grid { position:relative; flex:1; min-height:0; overflow-y:auto; padding:0 0 28px; scrollbar-gutter:stable; }
 .cc-media-grid.is-marquee-selecting { user-select:none; cursor:crosshair; }
 .cc-media-marquee { position:absolute; z-index:4; box-sizing:border-box; pointer-events:none; border:1px solid var(--cc-accent); border-radius:2px; background:color-mix(in srgb,var(--cc-accent) 12%,transparent); }
 .cc-media-blank-menu { position:fixed; z-index:95; width:220px; display:flex; flex-direction:column; gap:3px; padding:6px; }
@@ -1474,7 +2109,11 @@ button, input, select { font: inherit; }
 .cc-media-grid.list { display:block; }
 .cc-media-virtual-canvas { position:relative; width:100%; }
 .cc-media-virtual-row { position:absolute; left:0; width:100%; display:grid; }
-.cc-media-grid.grid .cc-asset-card { width:100%; max-width:104px; height:84px; }
+/* Grid tiles size themselves from the column, not a fixed 104px cap. A fixed
+   cap left a dead gutter on narrow screens and produced a ragged, cramped grid;
+   letting the card fill its track keeps the columns edge to edge and the thumb
+   aspect ratio consistent whatever the pane width is. */
+.cc-media-grid.grid .cc-asset-card { width:100%; max-width:none; height:auto; }
 .cc-asset-kind-mark { left:4px; right:auto; font-size:9px; font-weight:700; letter-spacing:.3px; }
 .cc-asset-preview-failed {
   position:absolute; left:4px; bottom:4px; width:16px; height:16px; display:grid; place-items:center;
@@ -1482,10 +2121,16 @@ button, input, select { font: inherit; }
 }
 .cc-asset-card, .cc-folder-card { position:relative; min-width:0; color:var(--cc-text-muted); }
 .cc-folder-card,.cc-add-solid-canvas-card {
-  width:100%; height:84px; display:grid; grid-template-rows:auto auto; align-content:start;
+  width:100%; min-height:84px; display:grid; grid-template-rows:auto auto; align-content:start;
   box-sizing:border-box; min-width:0; padding:0; border:0; border-radius:6px; background:transparent;
   color:var(--cc-text-dim); cursor:pointer; text-align:left;
 }
+/* The synthetic tiles' glyphs sit inside a 16:9 well. At 20px they read as
+   oversized and float; 15px matches the visual weight of the asset cards'
+   poster content and keeps the well looking like a container, not a badge. */
+.cc-media-entry-thumb > svg { width:15px; height:15px; opacity:.82; }
+.cc-folder-card:hover .cc-media-entry-thumb > svg,
+.cc-add-solid-canvas-card:hover .cc-media-entry-thumb > svg { opacity:1; }
 .cc-media-entry-thumb {
   width:100%; aspect-ratio:16/9; display:grid; place-items:center; box-sizing:border-box;
   border:0.5px solid var(--cc-hover); border-radius:6px; background:var(--cc-hover); color:var(--cc-text-dim);
@@ -1494,6 +2139,23 @@ button, input, select { font: inherit; }
 .cc-media-entry-name {
   display:block; min-width:0; overflow:hidden; padding:7px 4px 0; color:var(--cc-text-muted);
   font-size:12px; font-weight:400; line-height:1.25; white-space:nowrap; text-overflow:ellipsis;
+}
+/* Folder/shortcut names are full sentences ("Add solid background/canvas"), so a
+   single ellipsised one-line stub is useless. They wrap instead, clamped by
+   height to two lines.
+   NOTE: `-webkit-line-clamp` needs `display:-webkit-box`, but the parent card is
+   a grid whose `grid-template-rows:auto auto` re-enables block layout on the
+   child, so the clamp was silently ignored and the text was hard-clipped
+   mid-word. Clamping the height + `overflow:hidden` works regardless of the
+   computed display. */
+.cc-folder-card .cc-media-entry-name,
+.cc-add-solid-canvas-card .cc-media-entry-name {
+  white-space: normal;
+  height: calc(2 * 1.25em);
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: none;
 }
 .cc-folder-card:hover,.cc-add-solid-canvas-card:hover { background:transparent; color:var(--cc-text-strong); }
 .cc-folder-card:hover .cc-media-entry-thumb {
@@ -1516,6 +2178,29 @@ button, input, select { font: inherit; }
 }
 .cc-asset-thumb-wrap { position:relative; aspect-ratio:16/9; overflow:hidden; border:0.5px solid var(--cc-hover); border-radius:6px; background:var(--cc-hover); }
 .cc-asset-card.selected .cc-asset-thumb-wrap { border-color:var(--cc-text); box-shadow:0 0 0 0.5px var(--cc-text); }
+/* Small pulsing dot marking a tile that is genuinely playing (has a decode
+   slot). Without it a muted looping preview is hard to tell apart from a still,
+   and it explains why some tiles animate while others show a poster. */
+.cc-asset-live {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 3;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cc-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cc-panel) 70%, transparent);
+  pointer-events: none;
+  animation: cc-asset-live-pulse 1.8s ease-in-out infinite;
+}
+@keyframes cc-asset-live-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-asset-live { animation: none; opacity: .9; }
+}
 .cc-asset-thumb { position:relative; z-index:0; width:100%; height:100%; display:grid; place-items:center; padding:0; border:0; background:var(--cc-hover); color:var(--cc-text-muted); cursor:pointer; overflow:hidden; }
 .cc-asset-thumb img, .cc-asset-thumb video { width:100%; height:100%; display:block; object-fit:cover; }
 .cc-asset-duration { position:absolute; right:4px; bottom:4px; padding:2px 4px; border:0.5px solid var(--cc-border); border-radius:4px; background:color-mix(in srgb, var(--cc-panel-alt) 91%, transparent); color:var(--cc-text); font-size:10px; line-height:1.25; font-variant-numeric:tabular-nums; pointer-events:none; }
@@ -1615,19 +2300,59 @@ button, input, select { font: inherit; }
 .cc-media-empty svg { margin-bottom:3px; color:var(--cc-text-dim); }
 .cc-media-empty strong { color:var(--cc-text-muted); font-size:14px; font-weight:400; line-height:20px; }
 .cc-media-empty span { line-height:16px; }
-/* Empty-pool hint that sits under the two synthetic tiles (solid / favourites). */
+/* Empty-pool hint that sits under the two synthetic tiles (solid / favourites).
+   It is a note, NOT a filler: `flex: 1` used to let it swallow all the free
+   space in the pool, which pushed the grid below it down to a ~96px sliver and
+   left the two tiles cut off at the bottom edge. It now sizes to its content
+   and the grid keeps the remaining space. */
 .cc-media-pool-hint {
-  flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; gap:5px; padding:18px 16px 28px;
-  color:rgba(var(--cc-ink-rgb), .46); text-align:center; font-size:11.5px; line-height:1.5;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 12px;
+  color: rgba(var(--cc-ink-rgb), .46);
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
-.cc-media-pool-hint strong { color:var(--cc-text-muted); font-size:13px; font-weight:550; }
+.cc-media-pool-hint strong { color: var(--cc-text-muted); font-size: 12.5px; font-weight: 600; }
+.cc-media-pool-hint span { max-width: 30ch; }
+/* With nothing imported yet the grid is 200px tall holding one 103px row, and
+   the 28px bottom pad left the pool looking half-empty. Let the grid fill the
+   rest and centre the single row vertically, so the emptiness reads as
+   deliberate instead of as a layout that failed to finish. */
+.cc-media-pool:has(> .cc-media-pool-hint) > .cc-media-grid {
+  padding-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.cc-media-pool:has(> .cc-media-pool-hint) > .cc-media-grid > .cc-media-virtual-canvas {
+  width: 100%;
+}
 .cc-preview-empty { width:182px; height:146px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:48px; border:0.5px dashed rgba(var(--cc-ink-rgb), 0.12); border-radius:4px; background:transparent; color:var(--cc-text-dim); cursor:pointer; font-size:12px; white-space:nowrap; }
 .cc-preview-empty:hover { border-color:rgba(var(--cc-ink-rgb), 0.21); color:var(--cc-text-muted); }
 .cc-preview-empty:disabled { cursor:wait; opacity:.7; }
 .cc-preview-header { min-width:0; }
 .cc-preview-header > span { flex-shrink:0; }
 .cc-preview-header-actions { min-width:0; }
+/* Floating preview controls replace the old header bar. They sit on top of the
+   picture, so they stay out of the way: visible on hover/focus, and faded (but
+   still clickable) otherwise. Reduced-motion turns the transition off. */
+.cc-preview-float {
+  opacity: 0.28;
+  transition: opacity 140ms ease-out;
+}
+.cc-preview-stage:hover .cc-preview-float,
+.cc-preview-float:hover,
+.cc-preview-float:focus-within {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-preview-float { transition: none; opacity: 1; }
+}
 .cc-preview-stage {
   flex:1; min-width:0; min-height:0;
   display:flex; align-items:center; justify-content:center;
@@ -1750,11 +2475,40 @@ button, input, select { font: inherit; }
   .cc-timeline-transport { justify-self:center; }
 }
 @container timeline (max-width:560px) {
-  .cc-timeline-toolbar { grid-template-columns:minmax(0,1fr); min-height:92px; }
-  .cc-timeline-tool-group,.cc-timeline-transport,.cc-timeline-view-controls {
-    grid-column:1; justify-self:center;
+  /* Two compact rows, not three. The old rule gave tools / transport / view
+     controls a row each, which cost 92px of a 585px phone screen — a fifth of
+     the viewport for chrome. Now: transport (with timecode) on the first row,
+     everything else scrollable on the second, and the view controls lose the
+     pieces that duplicate gestures (zoom slider) to keep it to one line. */
+  .cc-timeline-toolbar {
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:
+      'transport view'
+      'tools     tools';
+    min-height:0;
+    row-gap:2px;
+    padding:2px 6px;
+    --cc-timeline-control-gap:3px;
   }
-  .cc-timeline-tool-group { max-width:100%; overflow-x:auto; scrollbar-width:none; }
+  .cc-timeline-transport { grid-area:transport; justify-self:start; }
+  .cc-timeline-view-controls { grid-area:view; justify-self:end; }
+  .cc-timeline-tool-group {
+    grid-area:tools;
+    justify-self:stretch;
+    max-width:100%;
+    overflow-x:auto;
+    scrollbar-width:none;
+  }
+  .cc-timeline-tool-group::-webkit-scrollbar { display:none; }
+  /* The zoom slider is redundant beside its own +/- buttons on a phone, and it
+     is the single widest control in the row. */
+  .cc-timeline-zoom { display:none; }
+  /* Timecode is the one thing worth spending width on: it is the read-out you
+     glance at while scrubbing. */
+  .cc-timeline-timecode { min-width:0; font-size:12px; }
+  /* Caption label collapses to its glyph; the tooltip still names it. */
+  .cc-caption-toggle > span { display:none; }
+  .cc-caption-toggle { padding:0 6px; }
 }
 /* The ruler is fixed at the top of the vertical scroll area; the track head is only fixed at the left side of the horizontal direction. Playhead z13 remains above the ruler.
    The sticky header must cover the absolute positioner in the scrolling content (selection z5 / snap line):
@@ -2539,6 +3293,83 @@ button, input, select { font: inherit; }
 .cc-captions-sourcebar label { color:var(--cc-text-muted); }
 .cc-captions-sourcebar .cc-cap-select { width:100%; max-width:none; }
 .cc-captions-sourcebar > span { max-width:96px; overflow:hidden; color:var(--cc-text-dim); text-overflow:ellipsis; white-space:nowrap; }
+/* ── Generate subtitles from audio ───────────────────────────────────────────
+   The Subtitles tab's first action when a project has no captions. Given its own
+   frosted card so it reads as "start here" rather than as another style control
+   in the list below it. */
+.cc-subgen {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 8px 12px 2px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  background:
+    radial-gradient(130% 120% at 18% 0%, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 60%),
+    rgba(var(--cc-ink-rgb), .05);
+  box-shadow: inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .12);
+}
+.cc-subgen-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.cc-subgen-mark {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cc-accent) 16%, transparent);
+  color: var(--cc-accent);
+}
+.cc-subgen-titles { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cc-subgen-titles > strong { font-size: 11.5px; font-weight: 650; color: var(--cc-text); line-height: 1.3; }
+.cc-subgen-titles > span { font-size: 10.5px; color: var(--cc-text-dim); line-height: 1.35; }
+.cc-subgen-field { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.cc-subgen-field > span { flex: 0 0 auto; font-size: 10.5px; color: var(--cc-text-muted); }
+.cc-subgen-field > select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 0.5px solid var(--cc-border);
+  border-radius: 5px;
+  background: var(--cc-hover);
+  color: var(--cc-text);
+  font: inherit;
+  font-size: 11px;
+}
+.cc-subgen-note { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--cc-text-dim); }
+.cc-subgen-note.warn { color: color-mix(in srgb, var(--cc-gold) 62%, var(--cc-text-muted)); }
+.cc-subgen-note.error { color: #e27f75; }
+.cc-subgen-note.progress { color: var(--cc-text-muted); font-variant-numeric: tabular-nums; }
+.cc-subgen-run {
+  width: 100%;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--cc-accent);
+  /* --cc-accent is white in this theme, so the label must be dark. */
+  color: var(--cc-panel);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter .14s ease, transform .14s cubic-bezier(.3, .9, .3, 1);
+}
+.cc-subgen-run:hover:not(:disabled) { filter: brightness(1.08); }
+.cc-subgen-run:active:not(:disabled) { transform: scale(.985); }
+.cc-subgen-run:disabled { opacity: .42; cursor: not-allowed; filter: none; }
+.cc-subgen-run:focus-visible { outline: 1.5px solid var(--cc-text); outline-offset: 2px; }
+.cc-subgen-foot { margin: 0; font-size: 10px; line-height: 1.4; color: var(--cc-text-dim); opacity: .8; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-subgen-run { transition: none; }
+  .cc-subgen-run:active:not(:disabled) { transform: none; }
+}
 /* Narrow dock sheet: stack the label above its select so the placeholder is
    not squeezed into ~130px next to a 64px label column. */
 .cc-library-sheet .cc-captions-sourcebar { grid-template-columns:minmax(0, 1fr); gap:4px; }
@@ -2663,6 +3494,10 @@ button, input, select { font: inherit; }
 /* ── Preview workspace and right-docked inspector ── */
 .cc-preview-workspace {
   display:flex; position:relative; min-height:0; min-width:0; overflow:hidden;
+  /* Grow into the cell it is placed in. Without this it is a flex item with an
+     auto basis, so inside a sized parent it collapses to 0×0 and the preview
+     disappears (regression seen on the deployed build). */
+  flex:1 1 auto; height:100%; width:100%;
   container:preview-workspace / inline-size;
 }
 .cc-inspector {
@@ -2892,6 +3727,246 @@ button, input, select { font: inherit; }
 .cc-md code { font-family: Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--cc-hover); color: color-mix(in srgb, var(--cc-gold) 75%, var(--cc-text-strong)); padding: 1px 5px; border-radius: 4px; border: 0.5px solid var(--cc-border); }
 .cc-md pre { margin: 0 0 10px; padding: 10px 12px; border-radius: 4px; background: var(--cc-panel-alt); border: 0.5px solid var(--cc-border); overflow-x: auto; }
 .cc-md pre code { background: none; border: 0; padding: 0; color: var(--cc-text); font-size: 12px; line-height: 1.45; }
+
+/* ── Tool-call rows ─────────────────────────────────────────────────────────
+   A run of tool calls is the most crowded thing in the transcript, and the old
+   inline styles made it nearly unreadable:
+   - the tool name used the full monospace face at weight 500, which reads as a
+     code dump rather than UI (a 20-char name measured ~150px in the narrow pane);
+   - the argument summary and the error were appended on ONE line, separated by a
+     colon, so "edit_captions · template：no current transcript…" ran together and
+     the failure read as part of the arguments;
+   - nothing truncated, so long queries pushed the row to wrap mid-word.
+
+   Now: the identifier stays monospace (it IS an identifier, and the tabular
+   metrics help scanning) but drops to 11px/500 with tightened tracking; the
+   summary is sans-serif, dimmer and clamped to one line; the error moves to its
+   own line in the danger hue so it can never be mistaken for an argument. */
+.cc-tool-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 7px 0;
+  color: var(--cc-text);
+  font-size: 12px;
+}
+.cc-tool-row-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.45;
+}
+/* The identifier itself: monospace, but small and quiet. */
+.cc-tool-row-name {
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--cc-text);
+  overflow-wrap: anywhere;
+}
+/* Argument summary: sans-serif so it is textually distinct from the tool name,
+   one line only, and faded so the name stays the anchor. */
+.cc-tool-row-args {
+  margin-top: 1px;
+  color: var(--cc-text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Leave room for the chevron/none; the parent is min-width:0 so this clamps. */
+  max-width: 100%;
+}
+/* Errors get their own block and a leading rule, so a failure is never read as
+   an argument value. `display:block` (not inline) is what makes the rail run the
+   full height of a wrapped message instead of only the first line. */
+.cc-tool-row-error {
+  display: block;
+  margin-top: 3px;
+  padding: 1px 0 1px 8px;
+  border-left: 2px solid #ff6e5c;
+  color: #ffb3a6;
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.cc-tool-row-action {
+  align-self: flex-start;
+  margin-top: 5px;
+  padding: 2px 10px;
+  border: 0.5px solid var(--cc-accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cc-accent);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cc-tool-row-action:hover { background: rgba(255, 255, 255, .08); }
+
+/* Collapsed run of same-name calls: "● edit_gap · 20 calls ▸". */
+.cc-tool-group { flex-direction: column; gap: 0; }
+.cc-tool-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--cc-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cc-tool-row-head:hover .cc-tool-row-name { color: var(--cc-text-strong); }
+.cc-tool-row-count {
+  color: var(--cc-text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cc-tool-row-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cc-text-dim);
+  transition: transform .16s cubic-bezier(.3, .9, .3, 1);
+}
+.cc-tool-row-chevron.is-open { transform: rotate(90deg); }
+.cc-tool-row-nest {
+  margin-left: 5px;
+  padding-left: 9px;
+  border-left: 1px solid var(--cc-border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-tool-row-chevron { transition: none; }
+}
+
+   The assistant can highlight spans, mark uncertainty, badge labels and show
+   keyboard shortcuts so a reply can be scanned instead of read line by line.
+   All of these render as real elements from mdast — never raw HTML — so the
+   "no HTML from model output" guarantee in Markdown.tsx still holds.
+
+   COLOUR NOTE: this theme is deliberately monochrome — --cc-accent, --cc-gold,
+   --cc-success and --cc-danger all resolve to #ffffff, so `color-mix()` off
+   those tokens produced the same grey for every decoration (highlights were
+   indistinguishable from warnings). The semantic hues below are therefore
+   spelled out explicitly, at a saturation that stays legible on the black chat
+   surface. Tint strength is kept low so the text itself stays the focus. */
+.cc-md-highlight,
+.cc-md-important,
+.cc-md-caution,
+.cc-md-success { font-style: normal; padding: 0 2px; border-radius: 3px; }
+
+/* ==highlight== — the neutral "look here" span. Uses a warm amber wash so it is
+   distinct from plain bold text without shouting. */
+.cc-md-highlight {
+  background: rgba(255, 199, 84, .20);
+  color: #ffe0a3;
+  box-shadow: inset 0 -0.5em 0 rgba(255, 199, 84, .12);
+}
+/* !!important!! — "do not miss this". */
+.cc-md-important {
+  background: rgba(255, 110, 92, .20);
+  color: #ffb3a6;
+  font-weight: 600;
+}
+/* ??caution?? — genuine uncertainty, so it reads as a question, not an error. */
+.cc-md-caution {
+  background: rgba(126, 190, 255, .18);
+  color: #b6dbff;
+}
+/* ++good++ — a confirmed/favourable value. */
+.cc-md-success {
+  background: rgba(94, 214, 154, .18);
+  color: #a7efc8;
+}
+/* ::badge:: — a small pill for a label, track name, or status. */
+.cc-md-badge {
+  display: inline-block;
+  padding: 0.5px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .26);
+  color: #fff;
+  font-size: 0.86em;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+/* [[Ctrl+S]] — keyboard chord. */
+.cc-md-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .10);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .22), inset 0 0 0 0.5px rgba(255, 255, 255, .2);
+  color: #fff;
+  font-family: Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+/* GFM strikethrough rendered without styling before, so it read as normal text. */
+.cc-md del { color: var(--cc-text-muted); text-decoration-thickness: 1px; }
+
+/* >>> toned callouts. The wrapper is the tone-coloured rail; the body is the
+   content. Kept as a flex row so the icon aligns to the first line of text.
+   Same colour caveat as above: explicit hues, not the monochrome tokens. */
+.cc-md-callout {
+  margin: 0 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .05);
+  border-left: 2.5px solid rgba(255, 255, 255, .28);
+  overflow: hidden;
+}
+.cc-md-callout-body { display: flex; align-items: flex-start; gap: 7px; padding: 8px 10px; }
+.cc-md-callout-icon { flex: 0 0 auto; margin-top: 2px; display: inline-flex; color: currentColor; }
+.cc-md-callout-content { min-width: 0; }
+.cc-md-callout-content > :last-child { margin-bottom: 0; }
+/* The wrapper carries the tone class; the inner body repeats it so both the rail
+   and the icon can be coloured from one place. */
+.cc-md-callout-tip,
+.cc-md-callout-body.cc-md-callout-tip { border-left-color: #5ed69a; }
+.cc-md-callout-tip { background: rgba(94, 214, 154, .09); }
+.cc-md-callout-tip .cc-md-callout-icon { color: #a7efc8; }
+
+.cc-md-callout-success,
+.cc-md-callout-body.cc-md-callout-success { border-left-color: #5ed69a; }
+.cc-md-callout-success { background: rgba(94, 214, 154, .09); }
+.cc-md-callout-success .cc-md-callout-icon { color: #a7efc8; }
+
+.cc-md-callout-info,
+.cc-md-callout-body.cc-md-callout-info { border-left-color: #7ebeff; }
+.cc-md-callout-info { background: rgba(126, 190, 255, .09); }
+.cc-md-callout-info .cc-md-callout-icon { color: #b6dbff; }
+
+.cc-md-callout-note { /* neutral: inherits the base rail + wash */ }
+.cc-md-callout-note .cc-md-callout-icon { color: var(--cc-text-muted); }
+
+.cc-md-callout-warning,
+.cc-md-callout-body.cc-md-callout-warning { border-left-color: #ffc754; }
+.cc-md-callout-warning { background: rgba(255, 199, 84, .09); }
+.cc-md-callout-warning .cc-md-callout-icon { color: #ffe0a3; }
+
+.cc-md-callout-danger,
+.cc-md-callout-body.cc-md-callout-danger { border-left-color: #ff6e5c; }
+.cc-md-callout-danger { background: rgba(255, 110, 92, .09); }
+.cc-md-callout-danger .cc-md-callout-icon { color: #ffb3a6; }
+
+/* An unknown tone already falls back to the note class in the plugin, so this is
+   only reached if a future tone is added to the parser but not to the CSS. */
+.cc-md-callout[class*="cc-md-callout-"]:not(.cc-md-callout-tip):not(.cc-md-callout-success):not(.cc-md-callout-info):not(.cc-md-callout-note):not(.cc-md-callout-warning):not(.cc-md-callout-danger) {
+  border-left-color: rgba(255, 255, 255, .28);
+}
+
+
 /* GFM tables: preserve column geometry and scroll inside the narrow chat pane.
    The wrapper is a real card — sticky header, zebra rows, hairline frame and a
    visible (thin) scrollbar — so a wide table reads as scrollable, not clipped. */
@@ -3113,25 +4188,781 @@ button, input, select { font: inherit; }
 .cc-track-row,
 .cc-main-dock,
 .cc-agent-edge {
-  border-image: var(--cc-line-grad) 1 !important;
+  border-image: none !important;
 }
 /* Vertical edges read the ramp top-to-bottom, not left-to-right. */
-.cc-timeline { border-image: var(--cc-line-grad-v) 1 !important; }
+.cc-timeline { border-image: none !important; }
 /* The 1px divider chips in the top bar are painted with a background, so they
    need the vertical ramp directly. */
-.cc-topbar > span[style*='var(--cc-border)'] { background: var(--cc-line-grad-v) !important; }
+.cc-topbar > span[style*='var(--cc-border)'] { background: var(--cc-border) !important; }
+
+/* ── Sent-message actions ────────────────────────────────────────────────────
+   One quiet "More" button replaces the lone Retry link. Its menu spells out
+   that re-sending rewinds the conversation, which the old button never did. */
+.cc-user-actions {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 3px;
+}
+.cc-user-actions-trigger {
+  width: 24px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cc-text-dim);
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.cc-user-actions-trigger:hover,
+.cc-user-actions-trigger[aria-expanded="true"] {
+  opacity: 1;
+  background: rgba(var(--cc-ink-rgb), .1);
+  color: var(--cc-text);
+}
+.cc-user-actions-trigger:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 1px; }
+.cc-user-actions-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 60;
+  min-width: 196px;
+  max-width: min(280px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border: 0.5px solid var(--cc-border);
+  border-radius: 9px;
+  background: var(--cc-panel-alt);
+  box-shadow: 0 12px 32px rgba(var(--cc-shadow-rgb), .5);
+  animation: cc-user-actions-in .13s ease-out both;
+}
+@keyframes cc-user-actions-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-user-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cc-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cc-user-actions-item:hover:not(:disabled) { background: var(--cc-hover); }
+.cc-user-actions-item:disabled { opacity: .42; cursor: default; }
+.cc-user-actions-item.is-destructive { color: #e2725b; }
+.cc-user-actions-item svg { flex: 0 0 auto; opacity: .85; }
+.cc-user-actions-item:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 1px; }
+.cc-user-actions-note {
+  margin: 2px 2px 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(226, 114, 91, .1);
+  color: var(--cc-text-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* ── Resend confirmation ─────────────────────────────────────────────────────
+   Re-sending truncates both histories and rolls back timeline edits, so it is
+   never a one-click action. The dialog lists what disappears. */
+.cc-resend-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(var(--cc-shadow-rgb), .55);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: cc-resend-fade .14s ease-out both;
+}
+@keyframes cc-resend-fade { from { opacity: 0; } to { opacity: 1; } }
+.cc-resend {
+  width: min(340px, 100%);
+  max-height: min(78vh, 520px);
+  overflow-y: auto;
+  padding: 13px 14px 12px;
+  border: 0.5px solid var(--cc-border);
+  border-radius: 13px;
+  background: var(--cc-panel-alt);
+  box-shadow: 0 24px 60px rgba(var(--cc-shadow-rgb), .6);
+  animation: cc-resend-pop .16s cubic-bezier(.2, .9, .3, 1.1) both;
+}
+@keyframes cc-resend-pop {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cc-resend-head { display: flex; align-items: center; gap: 8px; }
+.cc-resend-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(226, 114, 91, .16);
+  color: #e2725b;
+}
+.cc-resend-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--cc-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.cc-resend-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cc-text-dim);
+  cursor: pointer;
+}
+.cc-resend-close:hover { background: var(--cc-hover); color: var(--cc-text); }
+.cc-resend-body {
+  margin: 9px 0 0;
+  color: var(--cc-text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.cc-resend-sub {
+  margin: 11px 0 5px;
+  color: var(--cc-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.cc-resend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+.cc-resend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(var(--cc-ink-rgb), .06);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.cc-resend-item-dot {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #e2725b;
+  transform: translateY(-2px);
+}
+.cc-resend-item-text { flex: 1 1 auto; min-width: 0; color: var(--cc-text); overflow-wrap: anywhere; }
+.cc-resend-item-count {
+  flex: 0 0 auto;
+  color: var(--cc-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.cc-resend-warn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  color: var(--cc-text-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.cc-resend-warn svg { flex: 0 0 auto; opacity: .8; }
+.cc-resend-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 13px;
+}
+.cc-resend-cancel,
+.cc-resend-go {
+  padding: 6px 15px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter .12s ease, background .12s ease;
+}
+.cc-resend-cancel { background: rgba(var(--cc-ink-rgb), .1); color: var(--cc-text); }
+.cc-resend-cancel:hover:not(:disabled) { background: rgba(var(--cc-ink-rgb), .17); }
+.cc-resend-go { background: var(--cc-accent); color: var(--cc-panel); }
+.cc-resend-go.is-destructive { background: #e2725b; color: #fff; }
+.cc-resend-go:hover:not(:disabled) { filter: brightness(1.08); }
+.cc-resend-cancel:disabled,
+.cc-resend-go:disabled { opacity: .45; cursor: not-allowed; }
+.cc-resend-cancel:focus-visible,
+.cc-resend-go:focus-visible,
+.cc-resend-close:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-user-actions-menu,
+  .cc-resend-backdrop,
+  .cc-resend { animation: none; }
+}
+
+/* ── Plan card ───────────────────────────────────────────────────────────────
+   Plan mode's output. Steps are editable in place and re-orderable, and Run
+   hands them back as one message — the old flow ended in prose telling the user
+   to switch modes and retype. */
+.cc-plan {
+  margin: 10px 0;
+  padding: 10px 11px 9px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(var(--cc-ink-rgb), .06);
+  box-shadow: inset 0 1px 0 rgba(var(--cc-ink-rgb), .05);
+  animation: cc-plan-in .2s ease-out both;
+}
+@keyframes cc-plan-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-plan-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.cc-plan-mark {
+  flex: 0 0 auto;
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cc-accent) 22%, transparent);
+  color: var(--cc-text);
+}
+.cc-plan-title {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font-size: 12.5px; font-weight: 600; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cc-plan-count {
+  flex: 0 0 auto;
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  color: var(--cc-text-dim);
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .08);
+}
+.cc-plan-note {
+  margin: 7px 0 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: rgba(var(--cc-ink-rgb), .05);
+  font-size: 10.5px; line-height: 1.45;
+  color: var(--cc-text-dim);
+  overflow-wrap: anywhere;
+}
+.cc-plan-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cc-plan-step {
+  display: flex; align-items: flex-start; gap: 7px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  transition: background .12s ease;
+  animation: cc-plan-step-in .2s cubic-bezier(.3, .9, .3, 1) both;
+}
+/* Steps are keyed by index-normalised id, so a reorder remounts them and this
+   runs again: the list visibly settles instead of snapping to a new order. */
+@keyframes cc-plan-step-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-plan-step:hover { background: rgba(var(--cc-ink-rgb), .05); }
+.cc-plan-step.is-editing { background: rgba(var(--cc-ink-rgb), .08); }
+.cc-plan-step-no {
+  flex: 0 0 auto;
+  width: 15px; height: 15px; margin-top: 1px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .1);
+  font-size: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--cc-text-dim);
+}
+.cc-plan-step-text {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 0; border: 0; background: transparent;
+  color: var(--cc-text); font: inherit; text-align: left;
+  cursor: text; border-radius: 5px;
+}
+.cc-plan-step-text:disabled { cursor: default; opacity: .8; }
+.cc-plan-step-text:not(:disabled):hover .cc-plan-step-title { text-decoration: underline dotted; text-underline-offset: 2px; }
+.cc-plan-step-text:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 2px; }
+.cc-plan-step-title { font-size: 11.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.cc-plan-step-detail {
+  font-size: 10.5px; font-weight: 400; line-height: 1.4;
+  color: var(--cc-text-dim); overflow-wrap: anywhere;
+}
+.cc-plan-step-input {
+  flex: 1 1 auto; min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 0; border-radius: 6px;
+  background: rgba(var(--cc-ink-rgb), .1);
+  color: var(--cc-text);
+  font: inherit; font-size: 11.5px; line-height: 1.4;
+  resize: vertical;
+}
+.cc-plan-step-input:focus { outline: 1.5px solid var(--cc-accent); outline-offset: -1px; }
+/* Reorder / delete cluster.
+   Three separate glass CIRCLES (not a capsule, not squares): each button is its
+   own frosted disc so it reads as a floating control rather than a segmented
+   trio. The row fades and slides in on hover so the step text keeps focus. */
+.cc-plan-step-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0;
+  transform: translateX(6px) scale(.9);
+  transition: opacity .16s ease, transform .2s cubic-bezier(.3, .9, .3, 1);
+  transform-origin: right center;
+}
+.cc-plan-step:hover .cc-plan-step-tools,
+.cc-plan-step:focus-within .cc-plan-step-tools {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+.cc-plan-step-tool {
+  position: relative;
+  flex: 0 0 auto;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  /* A true circle: radius is half the box, so it never reads as a squircle. */
+  border-radius: 50%;
+  /* Glass: a faint tint plus an inset hairline for the rim, and a soft drop
+     shadow so the disc sits above the row instead of being drawn on it. */
+  background:
+    radial-gradient(120% 120% at 30% 18%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 62%),
+    rgba(var(--cc-ink-rgb), .08);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .16),
+    inset 0 1px 0 rgba(255, 255, 255, .1),
+    0 1px 2px rgba(0, 0, 0, .22);
+  -webkit-backdrop-filter: blur(9px) saturate(1.4);
+  backdrop-filter: blur(9px) saturate(1.4);
+  color: var(--cc-text-dim);
+  cursor: pointer;
+  transition:
+    background .16s ease,
+    box-shadow .16s ease,
+    color .16s ease,
+    transform .16s cubic-bezier(.3, .9, .3, 1);
+}
+/* The icon is a child svg; it animates independently so the disc can move
+   without dragging the glyph's own motion along with it. */
+.cc-plan-step-tool > svg {
+  transition: transform .2s cubic-bezier(.3, .9, .3, 1);
+}
+.cc-plan-step-tool:hover:not(:disabled) {
+  background:
+    radial-gradient(120% 120% at 30% 18%, rgba(255, 255, 255, .22), rgba(255, 255, 255, 0) 62%),
+    rgba(var(--cc-ink-rgb), .16);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .26),
+    inset 0 1px 0 rgba(255, 255, 255, .16),
+    0 2px 6px rgba(0, 0, 0, .3);
+  color: var(--cc-text);
+  transform: translateY(-1px);
+}
+/* The arrowhead leans in the direction it moves the step, and rises toward the
+   top of the disc — the glyph, not the button, carries the direction. */
+.cc-plan-step-tool.is-up:hover:not(:disabled) > svg { transform: translateY(-2.5px); }
+.cc-plan-step-tool.is-down:hover:not(:disabled) > svg { transform: translateY(2.5px); }
+/* Press: the disc sinks and the glyph snaps further in its direction, so the
+   reorder reads as a nudge rather than a plain click. */
+.cc-plan-step-tool:active:not(:disabled) {
+  transform: translateY(0) scale(.88);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .2),
+    inset 0 1px 3px rgba(0, 0, 0, .35);
+}
+.cc-plan-step-tool.is-up:active:not(:disabled) > svg { transform: translateY(-4px); }
+.cc-plan-step-tool.is-down:active:not(:disabled) > svg { transform: translateY(4px); }
+.cc-plan-step-tool.is-danger:hover:not(:disabled) {
+  background:
+    radial-gradient(120% 120% at 30% 18%, rgba(255, 255, 255, .2), rgba(255, 255, 255, 0) 62%),
+    rgba(226, 114, 91, .26);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(226, 114, 91, .5),
+    inset 0 1px 0 rgba(255, 255, 255, .14),
+    0 2px 6px rgba(0, 0, 0, .3);
+  color: #ff8f74;
+}
+.cc-plan-step-tool.is-danger:active:not(:disabled) > svg { transform: scale(.82); }
+.cc-plan-step-tool:disabled {
+  opacity: .22;
+  cursor: default;
+  box-shadow: inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .12);
+}
+.cc-plan-step-tool:focus-visible {
+  outline: 1.5px solid var(--cc-accent);
+  outline-offset: 1.5px;
+  background: rgba(var(--cc-ink-rgb), .18);
+  color: var(--cc-text);
+}
+.cc-plan-step-empty {
+  padding: 7px 8px;
+  font-size: 11px;
+  color: var(--cc-text-dim);
+}
+.cc-plan-foot {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 9px;
+}
+.cc-plan-dirty {
+  flex: 1 1 auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; color: var(--cc-text-dim);
+}
+.cc-plan-run {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 14px;
+  border: 0; border-radius: 999px;
+  background: var(--cc-accent); color: var(--cc-panel);
+  font: inherit; font-size: 11.5px; font-weight: 700;
+  cursor: pointer;
+  transition: filter .12s ease;
+}
+.cc-plan-run:hover:not(:disabled) { filter: brightness(1.1); }
+.cc-plan-run:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.cc-plan-run:focus-visible { outline: 1.5px solid var(--cc-text); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-plan { animation: none; }
+  .cc-plan-step { animation: none; }
+  .cc-plan-step-tools { transition: none; transform: none; opacity: 1; }
+  .cc-plan-step-tool,
+  .cc-plan-step-tool > svg { transition: none; }
+  /* Strip the directional leans; keep colour/shadow feedback only. */
+  .cc-plan-step-tool:hover:not(:disabled),
+  .cc-plan-step-tool:active:not(:disabled),
+  .cc-plan-step-tool:hover:not(:disabled) > svg,
+  .cc-plan-step-tool:active:not(:disabled) > svg { transform: none; }
+}
+/* Touch has no hover: keep the reorder/delete controls reachable. */
+@media (hover: none) {
+  .cc-plan-step-tools { opacity: 1; transform: none; }
+}
+
+/* ── App preload ─────────────────────────────────────────────────────────────
+   Shown while the editor chunk and project data are still arriving. The old
+   version was a grey "Loading editor… 44%" line over a 200×3px bar: no brand,
+   and a counter frozen at 44% reads as a hang. This one keeps the lockup, names
+   the actual stage, and uses an indeterminate sweep until a real number exists. */
+.cc-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle 420px at 50% 42%, rgba(193, 91, 255, .09), transparent 70%),
+    var(--cc-bg, #000);
+  /* Hidden for the first beat: on a warm cache this screen exists for under
+     ~120ms and a flash of a loading screen is worse than none. */
+  animation: cc-splash-in 220ms ease-out both;
+  animation-delay: 120ms;
+}
+@keyframes cc-splash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.cc-splash-inner {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  width: min(300px, 100%);
+  text-align: center;
+}
+.cc-splash-mark {
+  color: var(--cc-text, #fff);
+  animation: cc-splash-mark-in 420ms cubic-bezier(.22, 1, .36, 1) both;
+  animation-delay: 140ms;
+}
+@keyframes cc-splash-mark-in {
+  from { opacity: 0; transform: translateY(6px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cc-splash-headline {
+  margin: 0;
+  color: var(--cc-text, #fff);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  line-height: 1.35;
+}
+.cc-splash-track {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb, 255, 255, 255), .12);
+  overflow: hidden;
+}
+/* Indeterminate: a gradient segment sweeping the track. It never claims a
+   position, which is the honest signal when no real progress exists yet. */
+.cc-splash-runner {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: 999px;
+  background: var(--brand-gradient, linear-gradient(90deg, #ff5fa2, #c15bff, #3fa9ff));
+  animation: cc-splash-sweep 1.25s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+@keyframes cc-splash-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(305%); }
+}
+.cc-splash-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-gradient, linear-gradient(90deg, #ff5fa2, #c15bff, #3fa9ff));
+  transition: width 380ms cubic-bezier(.22, 1, .36, 1);
+}
+.cc-splash-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 14px;
+  font-size: 11px;
+  color: var(--cc-text-dim, rgba(255, 255, 255, .6));
+}
+.cc-splash-pct {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+}
+.cc-splash-note { opacity: .85; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-splash,
+  .cc-splash-mark { animation: none; }
+  /* A sweeping bar is decoration; a static fill still communicates "busy". */
+  .cc-splash-runner { animation: none; width: 100%; opacity: .35; }
+  .cc-splash-fill { transition: none; }
+}
+
+/* ── Preview top bar + panels ────────────────────────────────────────────────
+   The preview's controls used to float over the picture in two places: a corner
+   cluster (quality/guides/properties) and a row of text buttons pinned to the
+   clip you had selected. Both sat on top of the frame. They now share one bar
+   along the top edge, and anything with more than an on/off state opens a panel
+   below its own button. */
+.cc-preview-bar {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  right: 8px;
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 0;
+  /* A narrow stage cannot fit three labelled pills next to the inspector, so the
+     row scrolls horizontally instead of spilling under the panel. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  pointer-events: none;
+  opacity: .42;
+  transition: opacity 140ms ease-out;
+}
+.cc-preview-bar::-webkit-scrollbar { display: none; }
+/* The inspector is absolutely positioned over the right side of the stage, so the
+   bar has to stop short of it or its last buttons sit under the panel. */
+.cc-preview-workspace:has(.cc-inspector:not(.collapsed)) .cc-preview-bar { right: 332px; }
+@container preview-workspace (max-width: 640px) {
+  .cc-preview-workspace:has(.cc-inspector:not(.collapsed)) .cc-preview-bar { right: 178px; }
+}
+.cc-preview-stage:hover .cc-preview-bar,
+.cc-preview-bar:focus-within { opacity: 1; }
+.cc-preview-bar > * { pointer-events: auto; }
+.cc-preview-bar-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 7px; border-radius: 5px;
+  border: 0.5px solid var(--cc-accent);
+  background: color-mix(in srgb, var(--cc-panel) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  color: var(--cc-accent); font-size: 10.5px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cc-preview-bar-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 9px; border-radius: 6px;
+  border: 0.5px solid transparent;
+  background: color-mix(in srgb, var(--cc-panel) 80%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  color: var(--cc-text-dim);
+  font: inherit; font-size: 10.5px; font-weight: 500; line-height: 1.2;
+  white-space: nowrap; cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.cc-preview-bar-btn:hover { color: var(--cc-text); background: color-mix(in srgb, var(--cc-panel) 92%, transparent); }
+.cc-preview-bar-btn.is-on {
+  color: var(--cc-text);
+  border-color: var(--cc-border);
+  background: color-mix(in srgb, var(--cc-panel) 94%, transparent);
+}
+/* Icon-only form, used when the inspector is open and has no room for a label. */
+.cc-preview-bar-btn.is-icon { padding: 4px 6px; }
+.cc-preview-bar-btn:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-preview-bar, .cc-preview-bar-btn { transition: none; }
+  .cc-preview-bar { opacity: 1; }
+}
+
+.cc-preview-pop {
+  position: fixed;
+  z-index: 320;
+  display: flex; flex-direction: column;
+  padding: 4px;
+  border: 0.5px solid var(--cc-border);
+  border-radius: 10px;
+  background: var(--cc-panel-alt);
+  box-shadow: 0 16px 40px rgba(var(--cc-shadow-rgb), .62);
+  animation: cc-preview-pop-in 130ms ease-out both;
+}
+@keyframes cc-preview-pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-preview-pop-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 4px 5px 7px;
+}
+.cc-preview-pop-title {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--cc-text-dim);
+}
+.cc-preview-pop-close {
+  flex: 0 0 auto; width: 18px; height: 18px;
+  display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 999px; background: transparent;
+  color: var(--cc-text-dim); cursor: pointer;
+}
+.cc-preview-pop-close:hover { background: var(--cc-hover); color: var(--cc-text); }
+.cc-preview-pop-body { display: flex; flex-direction: column; gap: 1px; }
+.cc-preview-pop-option {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--cc-text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.cc-preview-pop-option:hover { background: var(--cc-hover); }
+.cc-preview-pop-option.is-on { background: color-mix(in srgb, var(--cc-accent) 18%, transparent); }
+.cc-preview-pop-option-name { font-size: 11.5px; font-weight: 600; }
+.cc-preview-pop-option-hint { font-size: 10px; line-height: 1.35; color: var(--cc-text-dim); }
+.cc-preview-pop-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+}
+.cc-preview-pop-row:hover { background: var(--cc-hover); }
+.cc-preview-pop-row-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cc-preview-pop-row-label { font-size: 11.5px; font-weight: 500; color: var(--cc-text); }
+.cc-preview-pop-row-hint { font-size: 10px; line-height: 1.35; color: var(--cc-text-dim); }
+.cc-preview-pop-row-control { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; }
+.cc-preview-pop-empty {
+  margin: 0; padding: 8px;
+  font-size: 11px; line-height: 1.45; color: var(--cc-text-dim);
+}
+.cc-preview-pop-action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  width: 100%; padding: 7px 9px; margin-bottom: 2px;
+  border: 0; border-radius: 7px;
+  background: color-mix(in srgb, var(--cc-accent) 16%, transparent);
+  color: var(--cc-text);
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.cc-preview-pop-action:hover { background: color-mix(in srgb, var(--cc-accent) 26%, transparent); }
+.cc-preview-pop-action.is-compact {
+  width: auto; margin: 0; padding: 4px 9px;
+  background: rgba(var(--cc-ink-rgb), .1);
+  font-size: 11px; font-weight: 500;
+}
+.cc-preview-pop-action.is-compact:hover { background: rgba(var(--cc-ink-rgb), .17); }
+.cc-preview-pop-stepper { display: inline-flex; gap: 2px; }
+.cc-preview-pop-stepper > button {
+  min-width: 26px; padding: 3px 6px;
+  border: 0; border-radius: 5px;
+  background: rgba(var(--cc-ink-rgb), .1); color: var(--cc-text);
+  font: inherit; font-size: 11px; cursor: pointer;
+}
+.cc-preview-pop-stepper > button:hover { background: rgba(var(--cc-ink-rgb), .18); }
+.cc-preview-pop-swatch {
+  width: 16px; height: 16px; border-radius: 5px;
+  box-shadow: inset 0 0 0 0.5px rgba(var(--cc-ink-rgb), .35);
+}
+.cc-preview-switch {
+  position: relative; width: 30px; height: 17px; padding: 0;
+  border: 0; border-radius: 999px;
+  background: rgba(var(--cc-ink-rgb), .18); cursor: pointer;
+  transition: background 140ms ease;
+}
+.cc-preview-switch.is-on { background: var(--cc-accent); }
+.cc-preview-switch-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 13px; height: 13px; border-radius: 999px;
+  background: var(--cc-panel);
+  transition: transform 140ms cubic-bezier(.3, .8, .3, 1);
+}
+.cc-preview-switch.is-on .cc-preview-switch-knob { transform: translateX(13px); }
+.cc-preview-switch:focus-visible { outline: 1.5px solid var(--cc-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-preview-pop { animation: none; }
+  .cc-preview-switch, .cc-preview-switch-knob { transition: none; }
+}
 
 /* Rounded frames can't use border-image (it squares the corners), so paint the
    border area with a gradient layer under an opaque padding-box layer. */
 .cc-work-card {
-  border-color: transparent !important;
-  background: linear-gradient(var(--cc-bg), var(--cc-bg)) padding-box,
-              var(--cc-line-grad-diag) border-box !important;
+  border-color: var(--cc-border) !important;
+  background: var(--cc-bg) !important;
 }
 .cc-library-sheet {
-  border-color: transparent;
-  background: linear-gradient(var(--cc-panel), var(--cc-panel)) padding-box,
-              var(--cc-line-grad) border-box;
+  border-color: var(--cc-border);
+  background: var(--cc-panel);
 }
 
 /* Rounded things — pill buttons, input wells, the sheet's back chip — cannot

@@ -22,6 +22,7 @@ import { loadAgentSettings, saveAgentSettings } from '../../agent/settings/agent
 import { getLocale, useT } from '../../i18n/locale';
 import type { RemoteMessage } from '../../modules/remote/remoteControlApi';
 import { useRemoteControlHost, type RemoteControlHost } from '../../modules/remote/useRemoteControlHost';
+import { useRemotePreviewStream } from '../../modules/remote/useRemotePreviewStream';
 import {
   clearComposerDraft,
   loadChatAutoApply,
@@ -475,6 +476,8 @@ export function useChatPanelController(props: ChatPanelProps): ChatPanelControll
   const changeLogSlot = useChangeLogSlot();
   const visibleFrom = Math.max(0, agent.messages.length - composer.visibleMessageCount);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  // Phones opt in to the live preview; nothing is captured until one does.
+  const [remoteWatching, setRemoteWatching] = useState(false);
   // Phone uploads become ordinary media-pool assets; the reference is replayed
   // on the next prompt so the model receives the image the phone showed.
   const remoteRefs = useRef<AgentReference[]>([]);
@@ -487,6 +490,7 @@ export function useChatPanelController(props: ChatPanelProps): ChatPanelControll
       void agent.send(text, references.length > 0 ? { references } : undefined);
     },
     onStop: () => agent.stop(),
+    onWatch: (watching) => setRemoteWatching(watching),
     onImage: async (file) => {
       const asset = await props.onImportMedia(file);
       remoteRefs.current = [...remoteRefs.current, { id: asset.id, name: asset.name, kind: asset.kind }];
@@ -494,8 +498,13 @@ export function useChatPanelController(props: ChatPanelProps): ChatPanelControll
     readSnapshot: () => ({
       running: agent.running,
       liveTool: agent.liveTool?.name ?? null,
+      previewLive: remoteWatching,
       messages: remoteTranscript(agent.messages),
     }),
+  });
+  useRemotePreviewStream({
+    sessionId: remote.session?.id ?? null,
+    active: remoteOpen && remoteWatching,
   });
   return {
     props,

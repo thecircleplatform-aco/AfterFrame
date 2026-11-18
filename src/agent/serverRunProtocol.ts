@@ -26,6 +26,8 @@ export interface ServerRunStart {
   readonly references: readonly AgentReference[];
   readonly baseDoc: ProjectDoc;
   readonly resumed: boolean;
+  /** Id of the user turn this run belongs to; stamped on its change sessions. */
+  readonly turnId?: string;
 }
 export type ServerRunPreparation = Omit<ServerRunStart, 'recorder' | 'resumed'>;
 

@@ -19,6 +19,8 @@ export interface PreparedServerRun {
   readonly modelHistoryLength: number;
   readonly options: ServerRunOptions;
   readonly sendOptions: AgentSendOptions;
+  /** Identifies this user turn; stamped on the change sessions its run writes. */
+  readonly turnId: string;
 }
 
 interface PrepareServerRunInput {
@@ -94,5 +96,6 @@ export async function buildPreparedServerRun(input: PrepareServerRunInput): Prom
     options,
     sendOptions,
     modelHistoryLength: modelMessages.length,
+    turnId: crypto.randomUUID(),
   };
 }

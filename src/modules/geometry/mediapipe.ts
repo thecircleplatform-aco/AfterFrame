@@ -21,13 +21,14 @@ export const SEG_THRESHOLD = 0.4;
  * detector's working range); CPU inference at 2fps stays cheap. */
 export const INFERENCE_EDGE = 512;
 
-const WASM_PATH = '/mediapipe/wasm';
-const SEG_MODEL = '/mediapipe/selfie_segmenter.tflite';
-const FACE_MODEL = '/mediapipe/blaze_face_short_range.tflite';
+const WASM_PATH = runtimeAsset('/mediapipe/wasm');
+const SEG_MODEL = runtimeAsset('/mediapipe/selfie_segmenter.tflite');
+const FACE_MODEL = runtimeAsset('/mediapipe/blaze_face_short_range.tflite');
 
 import { GEOM_GRID_H, GEOM_GRID_W, type GeomRect } from './geometry-math';
 import type { FrameGeom } from './geometry-math';
 import type { FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
+import { runtimeAsset } from '../../tier/assets';
 
 export interface MediaPipeRuntime {
   segment: (canvas: HTMLCanvasElement) => { face: GeomRect | null; occ: Uint8Array };

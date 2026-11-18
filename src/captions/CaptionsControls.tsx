@@ -75,7 +75,10 @@ export function CaptionsControls({
           <div className="cc-cap-empty-actions">
             <button type="button" className="cc-cap-btn primary" onClick={onCreateManual}>{t('Add a caption')}</button>
           </div>
-          <p className="cc-cap-hint">{t('Open “Caption style” from the transcript, or add a standalone caption here.')}</p>
+          {/* The old copy sent people to the Transcript tab, which only got them
+              as far as a caption track with no style. Generating subtitles is
+              now a first-class action above this box, so point at it instead. */}
+          <p className="cc-cap-hint">{t('Use “Generate subtitles from audio” above to detect speech automatically, or add captions by hand.')}</p>
         </div>
       )}
 

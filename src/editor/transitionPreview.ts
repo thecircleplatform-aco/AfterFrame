@@ -2,6 +2,7 @@
 // file only exports components (react only-export-components).
 import { CSS_TRANSITION_TYPES } from './types';
 import type { CssTransitionType, TransitionItem } from './types';
+import { EXTENDED_PREVIEW_APPROXIMATION } from '../gl/extendedTransitions.generated.js';
 
 const PREVIEW_APPROXIMATION: Partial<Record<TransitionItem['type'], CssTransitionType>> = {
   'clean-line-wipe': 'soft-wipe',
@@ -13,6 +14,8 @@ const PREVIEW_APPROXIMATION: Partial<Record<TransitionItem['type'], CssTransitio
   'radial-blur': 'luma-blend',
   'glitch-cut': 'flash',
   'dip-to-color': 'dip-to-black',
+  // generated catalog: every extended entry declares its closest CSS behaviour
+  ...EXTENDED_PREVIEW_APPROXIMATION,
 };
 
 export function previewTransitionType(type: TransitionItem['type']): CssTransitionType {

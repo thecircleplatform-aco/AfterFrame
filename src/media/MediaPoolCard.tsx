@@ -11,6 +11,7 @@ import { assetIdsFromFolderDrop } from './folderDrop';
 import { durationLabel, mediaRatioLabel } from './mediaPoolFormat';
 import { MgThumb } from './MgThumb';
 import { usePreviewMediaSource } from './previewMedia';
+import { useLivePreview } from './useLivePreview';
 import { assetCanTranscribe } from '../transcript/transcribe-jobs';
 
 interface MediaAssetCardProps {
@@ -44,6 +45,8 @@ interface AssetPreviewProps {
   asset: MediaAsset;
   fps: number;
   active: boolean;
+  /** A live-preview decode slot is available (see useLivePreview). */
+  live: boolean;
   onLoadError: (id: string) => void;
   onLoadSuccess: (id: string) => void;
 }
@@ -91,13 +94,17 @@ function VideoPoster({ src, name }: { src?: string; name: string }) {
   return <img src={src} alt={name} draggable={false} onError={() => setFailed(true)} />;
 }
 
-function AssetPreview({ asset, fps, active, onLoadError, onLoadSuccess }: AssetPreviewProps) {
+function AssetPreview({ asset, fps, active, live, onLoadError, onLoadSuccess }: AssetPreviewProps) {
   const preview = usePreviewMediaSource(asset.kind === 'video' ? asset.src : undefined);
   if (asset.kind === 'image' || asset.kind === 'gif' || asset.kind === 'svg') {
     return <img src={asset.src} alt={asset.name} draggable={false} onError={() => onLoadError(asset.id)} onLoad={() => onLoadSuccess(asset.id)} />;
   }
   if (asset.kind === 'video') {
-    const media = active
+    // Playing is now the default state of a visible tile (a live preview), not a
+    // hover affordance. `active` (hover/focus) is still honoured so pointing at a
+    // card that has no decode slot yet promotes it once it is released.
+    const playing = live || active;
+    const media = playing
       ? (
         <ReleasableVideo
           key={preview.previewSrc ?? asset.src}
@@ -122,7 +129,7 @@ function AssetPreview({ asset, fps, active, onLoadError, onLoadSuccess }: AssetP
       </>
     );
   }
-  if (asset.kind === 'motion-graphic') return <MgThumb asset={asset} fps={fps} active={active} />;
+  if (asset.kind === 'motion-graphic') return <MgThumb asset={asset} fps={fps} active={live || active} />;
   if (asset.kind === 'document') return <Icon name="text" size={32} strokeWidth={1.35} />;
   if (asset.kind === 'file') return <Icon name="paperclip" size={32} strokeWidth={1.35} />;
   return <Icon name="music" size={32} strokeWidth={1.35} />;
@@ -133,7 +140,7 @@ function previewable(asset: MediaAsset): boolean {
 }
 
 export const MediaAssetCard = memo(function MediaAssetCard(props: MediaAssetCardProps) {
-  const { asset, missing, onFocusChange, onPointerChange, view } = props;
+  const { asset, missing, onFocusChange, onPointerChange } = props;
   return (
     <div
       data-cc-media-asset-id={asset.id}
@@ -176,7 +183,7 @@ export const MediaAssetCard = memo(function MediaAssetCard(props: MediaAssetCard
         const point = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined;
         props.onOpenMenu(asset.id, target ?? event.currentTarget, point);
       }}
-      onPointerEnter={() => { if (view === 'grid' && !missing && previewable(asset)) onPointerChange(asset.id); }}
+      onPointerEnter={() => { if (!missing && previewable(asset)) onPointerChange(asset.id); }}
       onPointerLeave={() => onPointerChange(null)}
       onFocusCapture={() => {
         onFocusChange(asset.id);
@@ -196,8 +203,13 @@ export const MediaAssetCard = memo(function MediaAssetCard(props: MediaAssetCard
 function AssetThumbArea(props: MediaAssetCardProps) {
   const { asset, active, missing } = props;
   const t = useT();
+  // Live previews run for every visible video / motion-graphic tile in both
+  // views. `useLivePreview` handles the viewport + decode-slot budget, so this
+  // is safe to enable unconditionally rather than gating on hover.
+  const canPreview = !missing && previewable(asset);
+  const { ref: liveRef, live } = useLivePreview(canPreview);
   return (
-    <div className="cc-asset-thumb-wrap">
+    <div className="cc-asset-thumb-wrap" ref={liveRef}>
       <button
         className="cc-asset-thumb"
         title={missing
@@ -212,9 +224,10 @@ function AssetThumbArea(props: MediaAssetCardProps) {
           ? <AssetListIcon asset={asset} />
           : missing
             ? <MissingMedia />
-            : <AssetPreview key={asset.src} asset={asset} fps={props.fps} active={active} onLoadError={props.onLoadError} onLoadSuccess={props.onLoadSuccess} />}
+            : <AssetPreview key={asset.src} asset={asset} fps={props.fps} active={active} live={live} onLoadError={props.onLoadError} onLoadSuccess={props.onLoadSuccess} />}
       </button>
       <AssetBadges {...props} />
+      {live && <span className="cc-asset-live" aria-hidden="true" />}
     </div>
   );
 }

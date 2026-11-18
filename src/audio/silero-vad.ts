@@ -5,10 +5,13 @@
 import * as ort from 'onnxruntime-web/wasm';
 import { registerVadRunner, type VadRunResult } from './vad';
 import type { VadTimeSpan } from '../persist/vadEvidenceStore';
-const MODEL_URL = '/models/silero-vad/silero_vad.onnx';
+import { runtimeAsset } from '../tier/assets';
+const MODEL_URL = runtimeAsset('/models/silero-vad/silero_vad.onnx');
 // The ort backend loader + wasm binary sit beside the model in public/ so no
 // node_modules subpath (blocked by the package exports map) is ever imported.
-const WASM_PATH = '/models/silero-vad/';
+// When VITE_RUNTIME_ASSETS_URL is set (hosted build) these resolve to R2; when
+// it is unset they are the same-origin paths they have always been.
+const WASM_PATH = runtimeAsset('/models/silero-vad') + '/';
 const VAD_SAMPLE_RATE = 16_000;
 const WINDOW_SIZE = 512; // 32ms @16kHz — Silero VAD's native window
 const MERGE_GAP_WINDOWS = 2;

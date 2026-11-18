@@ -86,6 +86,7 @@ function useEditorUiStage(props: EditorProps, base: BaseStage, environment: Envi
     commands, docRef: agent.docRef, fps: state.fps, projectId: props.project.id, t,
     shortcutApiRef: dialogs.shortcutApiRef, setShowDesign: dialogs.setShowDesign,
     setShowVersions: dialogs.setShowVersions, setShowShortcuts: dialogs.setShowShortcuts,
+    setShowVault: dialogs.setShowVault,
     setChatCollapsed: panels.setChatCollapsed, selectAllTimelineContent: selection.selectAllTimelineContent,
   });
   return { dialogs, persistence, panels, ingest, exportActions };
@@ -106,7 +107,7 @@ function buildEditorWorkspaceViewProps(
   const { activeSlipPreview, captionSelection, captionSelections, captionTracks, selectCaption, selectMarqueeCaptions, selectedCaption, selectedIds, selectedItem, selectedItems, selectedSlipPlan, selectedTransition, getSequenceOptions, setActiveSlipPreview, setReviewRequest, setTimelineHoverPreviewFrame, timelineHoverPreviewFrame, trackOptions, usedAssetIds } = selection;
   const { historyGesture, stateRef, applyInspectorSelection, docRef, offlineSrcs, offlineAssetIds, markOffline: markMediaOffline, creativeMode, changeCreativeMode, playerRef, selectedPreviewStatuses, handleSelectedPreviewStatus, allTemplates, agentCtx, previewState, setPreviewState } = environment.agent;
   const { autoGradeBusy, autoGradeSession, autoGradeTargets, cancelAutoGrade, analyzeSelectedColor, applyAutoGrade, autoGradePreviewState, selectedAutoGrade } = environment.autoGrade;
-  const { chatSeed, setChatSeed, showDesign, setShowDesign, showVersions, setShowVersions, showShortcuts, setShowShortcuts, showSettings, setShowSettings, settingsRoute, setSettingsRoute, shortcutApiRef, getPlayhead } = ui.dialogs;
+  const { chatSeed, setChatSeed, showDesign, setShowDesign, showVersions, setShowVersions, showShortcuts, setShowShortcuts, showSettings, setShowSettings, settingsRoute, setSettingsRoute, showVault, setShowVault, shortcutApiRef, getPlayhead } = ui.dialogs;
   const { handleHome } = ui.persistence;
   const { chatCollapsed, setChatCollapsed, panelLayout, inspectorCollapsed, setInspectorCollapsed, addTemplate } = ui.panels;
   const { startAssetTranscription, ingestToPool, importMobileUpload, importToPool, dropExternalFilesToTimeline, addMediaAssetsToTimeline, importToCanvas, pasteMediaAssets, useMediaAI, useTemplateAI } = ui.ingest;
@@ -120,6 +121,7 @@ function buildEditorWorkspaceViewProps(
     versionHistory: showVersions ? { projectId: project.id, currentDoc: doc, onRestore: (d) => { commands.applyDoc(d); setShowVersions(false); }, onClose: () => setShowVersions(false) } : null,
     shortcutsDialog: showShortcuts ? { onClose: () => setShowShortcuts(false) } : null,
     settingsDialog: showSettings ? { onClose: () => { setShowSettings(false); setSettingsRoute(undefined); }, initialVendor: settingsRoute } : null,
+    vaultDialog: showVault ? { onClose: () => setShowVault(false) } : null,
     chatPanel: { ctx: agentCtx, projectId: project.id, collapsed: chatCollapsed, onToggleCollapse: () => setChatCollapsed((v) => !v), onPreviewState: setPreviewState, seed: chatSeed, creativeMode, onCreativeModeChange: changeCreativeMode, onImportMedia: importToPool, onOpenSettings: (route?: string) => { setSettingsRoute(route); setShowSettings(true); } },
     chatCollapsed,
     onResizeChat: panelLayout.resizeChat,

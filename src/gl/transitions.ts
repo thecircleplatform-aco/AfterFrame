@@ -4,6 +4,13 @@
 // color defaults aren't in that table — chosen by eye.
 import type { GlslTransitionType, TransitionDirection } from '../editor/types';
 import type { UniformValue } from './runtime';
+import {
+  EXTENDED_DIRECTIONAL,
+  EXTENDED_TRANSITION_IDS,
+  EXTENDED_TRANSITION_UNIFORMS,
+  type ExtendedTransitionType,
+} from './extendedTransitions.generated.js';
+import { EXTENDED_TRANSITION_FRAGS } from './extendedTransitionRegistry.generated.js';
 import pageCurl from './shaders/page-curl.frag.ts';
 import rackFocus from './shaders/rack-focus.frag.ts';
 import organicDissolve from './shaders/organic-dissolve.frag.ts';
@@ -26,6 +33,45 @@ export interface GlslTransitionDef {
   /** per-frame uniforms beyond u_progress/u_resolution/u_aspect */
   uniforms: (ctx: { time: number; aspect: number; direction: TransitionDirection }) => Record<string, UniformValue>;
 }
+
+/** Direction name → UV vector, shared by every directional transition. */
+export const DIRECTION_VECTORS: Record<TransitionDirection, [number, number]> = {
+  right: [-1, 0],
+  left: [1, 0],
+  up: [0, 1],
+  down: [0, -1],
+};
+
+/**
+ * Build the registry rows for the generated catalog: one `frag` import per
+ * shader, plus a `uniforms` closure returning that entry's catalog defaults.
+ * `u_direction` is derived from the item's direction so directional entries
+ * don't need a per-type switch.
+ */
+function extendedDefs(): Record<ExtendedTransitionType, GlslTransitionDef> {
+  const defs = {} as Record<ExtendedTransitionType, GlslTransitionDef>;
+  for (const id of EXTENDED_TRANSITION_IDS) {
+    const defaults = EXTENDED_TRANSITION_UNIFORMS[id] ?? {};
+    const directional = EXTENDED_DIRECTIONAL.has(id);
+    defs[id] = {
+      frag: EXTENDED_TRANSITION_FRAGS[id],
+      uniforms: ({ time, direction }) => {
+        const values: Record<string, UniformValue> = { u_time: time };
+        for (const [key, value] of Object.entries(defaults)) {
+          values[key] = typeof value === 'number' ? value : [value[0], value[1]];
+        }
+        if (directional) {
+          const [dx, dy] = DIRECTION_VECTORS[direction];
+          values.u_direction = [dx, dy];
+        }
+        return values;
+      },
+    };
+  }
+  return defs;
+}
+
+const EXTENDED_TRANSITION_DEFS = extendedDefs();
 
 export const GLSL_TRANSITIONS: Record<GlslTransitionType, GlslTransitionDef> = {
   'cross-dissolve': {
@@ -136,4 +182,9 @@ export const GLSL_TRANSITIONS: Record<GlslTransitionType, GlslTransitionDef> = {
       u_hold: 0.12,
     }),
   },
+  // ── 158-entry extended catalog (generated) ───────────────────────────────
+  // Sources live in `src/gl/shaders/<id>.frag`; the entry list and uniforms in
+  // `scripts/lib/transition-catalog.mjs`. Regenerate with
+  // `npm run sync:transitions` rather than editing anything below by hand.
+  ...EXTENDED_TRANSITION_DEFS,
 };

@@ -42,6 +42,7 @@ import { storedServerRunPreservesHydration } from './serverRunRecovery';
 import {
   loadAgentRuntimeSidecar,
   recoverInterruptedAgentRuns,
+  settleOrphanedAgentRuns,
   type AgentRunStatus,
 } from '../persist/agentRuntimeStore';
 import type { AgentHookState } from './useAgentState';
@@ -195,9 +196,15 @@ export async function loadRecoveredAgentSession(
   // bump the sidecar revision or serialize a write per navigation. Also
   // covers recover()'s approval-cancellation branch: a stale external
   // record whose run is preserved must still cancel its pending approvals.
-  const sidecarBefore = await loadAgentRuntimeSidecar(projectId);
   const now = Date.now();
-  const needsRecovery = sidecarBefore.runs.some((run) => {
+  // Settle runs that were recorded but never got a lease (the tab died, or the
+  // lease claim failed, between the two writes). Without this an orphaned
+  // "running" record keeps the composer busy forever: the chat accepts no new
+  // messages and the server holds an SSE slot for a run nobody owns. Runs that
+  // hold a live lease are never touched here.
+  await settleOrphanedAgentRuns(projectId, now).catch(() => 0);
+  const sidecarAfterSweep = await loadAgentRuntimeSidecar(projectId);
+  const needsRecovery = sidecarAfterSweep.runs.some((run) => {
     if (['completed', 'failed', 'aborted', 'interrupted'].includes(run.status)) return false;
     if (preservedRunIds.has(run.runId)) {
       return externalRunIds.has(run.runId)

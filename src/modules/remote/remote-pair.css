@@ -6,8 +6,37 @@
 .cc-remote-pair-dialog button { border:0.5px solid var(--cc-border); border-radius:6px; background:var(--cc-hover); color:var(--cc-text); cursor:pointer; }
 .cc-remote-pair-dialog header button { display:grid; width:28px; height:28px; flex:0 0 28px; place-items:center; padding:0; }
 .cc-remote-pair-body { display:grid; grid-template-columns:200px minmax(0,1fr); gap:18px; padding:18px; }
-.cc-remote-pair-qr { display:grid; width:200px; height:200px; place-items:center; overflow:hidden; border-radius:10px; background:#fff; color:var(--cc-inset); font-size:12px; }
+.cc-remote-pair-qr { position:relative; display:grid; width:200px; height:200px; place-items:center; overflow:hidden; border-radius:10px; background:#fff; color:var(--cc-inset); font-size:12px; }
 .cc-remote-pair-qr img { display:block; width:200px; height:200px; }
+/* Brand mark centred over the code. The white disc is what keeps it scannable —
+   it CLEARS the modules under the logo instead of tinting them (a dark logo over
+   dark modules corrupts the pattern). Sized ~7% of the code area so it stays
+   inside the ~15% budget that error-correction level M tolerates. */
+.cc-remote-pair-qr-mark {
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  display:grid;
+  place-items:center;
+  width:40px;
+  height:40px;
+  border-radius:11px;
+  background:#fff;
+  /* A hairline of the same white outside the disc reads as a quiet pad and
+     guarantees a clean quiet zone on all four sides. */
+  box-shadow:0 0 0 3px #fff;
+}
+.cc-remote-pair-qr-mark-inner {
+  display:grid;
+  place-items:center;
+  width:34px;
+  height:34px;
+  border-radius:8px;
+  background:linear-gradient(135deg,#ec4899,#9333ea 55%,#3b82f6);
+  color:#fff;
+  box-shadow:0 2px 7px rgba(147,51,234,.35);
+}
 .cc-remote-pair-side { display:flex; min-width:0; flex-direction:column; gap:10px; }
 .cc-remote-pair-side ol { display:grid; gap:8px; margin:0; padding-left:20px; color:var(--cc-text-muted); font-size:12px; line-height:1.45; }
 .cc-remote-pair-side label { display:flex; align-items:center; gap:8px; color:var(--cc-text-muted); font-size:11px; }
@@ -16,6 +45,10 @@
 .cc-remote-pair-link code { min-width:0; flex:1; overflow:hidden; border:0.5px solid var(--cc-border); border-right:0; border-radius:6px 0 0 6px; background:var(--cc-inset); color:var(--cc-text-muted); padding:8px; text-overflow:ellipsis; white-space:nowrap; }
 .cc-remote-pair-link button { border-radius:0 6px 6px 0; padding:0 12px; }
 .cc-remote-pair-timer { margin:0; color:var(--cc-text-dim); font-size:11px; }
+/* Public-tunnel note: this is the happy path (works off-Wi-Fi), so it gets a
+   quiet success tint rather than the same grey as the timer text. */
+.cc-remote-pair-public { display:flex; align-items:center; gap:7px; margin:0; padding:7px 9px; border-radius:7px; background:color-mix(in srgb, #35d07f 12%, transparent); color:var(--cc-text-muted); font-size:11px; line-height:1.4; }
+.cc-remote-pair-public-badge { flex:0 0 auto; padding:1px 7px; border-radius:999px; background:#35d07f; color:#07130c; font-size:10px; font-weight:700; letter-spacing:.02em; }
 .cc-remote-pair-status { display:flex; align-items:center; gap:7px; margin-top:auto; color:var(--cc-text-muted); font-size:12px; }
 .cc-remote-pair-dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:var(--cc-text-dim); }
 .cc-remote-pair-status.live { color:var(--cc-text); }

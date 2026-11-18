@@ -3,8 +3,9 @@ import type { PlayerRef } from '@remotion/player';
 import type { TimelineItem, TrackId } from '../editor/types';
 import { useT } from '../i18n/locale';
 import { trackTitle, type TranscriptTrackOption } from '../transcript/trackOptions';
-import { msToFrame } from '../transcript/types';
+import { msToFrame, type TranscriptWord } from '../transcript/types';
 import { CaptionsControls } from './CaptionsControls';
+import { GenerateSubtitles } from './GenerateSubtitles';
 import { newManualCaptions } from './manualCaptions';
 import { buildTranslation } from './translate';
 import type { CaptionsData } from './types';
@@ -14,12 +15,19 @@ interface Props {
   fps: number;
   items: TimelineItem[];
   captionTracks: Array<TranscriptTrackOption & { captions: CaptionsData | null }>;
+  /** Every video/audio track — the speech to detect lives on one of these. */
+  trackOptions: TranscriptTrackOption[];
   onSetCaptions: (captions: CaptionsData | null, track?: TrackId) => void;
   onUpdateCaptions: (patch: Partial<CaptionsData>, track?: TrackId) => void;
+  onCreateCaptionTrack: (captions: CaptionsData, opts?: { name?: string; order?: number }) => TrackId;
+  onSetItemTranscript: (id: string, words: TranscriptWord[]) => void;
 }
 
 export function CaptionsPanel(props: Props) {
-  const { playerRef, fps, items, captionTracks, onSetCaptions, onUpdateCaptions } = props;
+  const {
+    playerRef, fps, items, captionTracks, trackOptions,
+    onSetCaptions, onUpdateCaptions, onCreateCaptionTrack, onSetItemTranscript,
+  } = props;
   const [captionTrack, setCaptionTrack] = useState<TrackId | null>(captionTracks[0]?.id ?? null);
   const captions = captionTracks.find((option) => option.id === captionTrack)?.captions ?? null;
   useEffect(() => {
@@ -33,6 +41,18 @@ export function CaptionsPanel(props: Props) {
       <div className="cc-captions-context">
         <CaptionTrackBar options={captionTracks} track={captionTrack} onChange={setCaptionTrack} />
       </div>
+      {/* One-click path from "no subtitles at all" to timed captions. It sits
+          above the style controls because generating is the first thing a user
+          needs when the track is empty, and it stays available afterwards to
+          rebuild from a different source track. */}
+      <GenerateSubtitles
+        items={items}
+        trackOptions={trackOptions}
+        captionTracks={captionTracks}
+        onCreateCaptionTrack={onCreateCaptionTrack}
+        onSetItemTranscript={onSetItemTranscript}
+        onCreated={setCaptionTrack}
+      />
       <CaptionsControls captionTrackId={captionTrack ?? undefined} captions={captions} sourceVariants={(captions?.sourceItemId ? items.find((item) => item.id === captions.sourceItemId)?.variants : undefined) ?? []} items={items} fps={fps} onSeekMs={(ms) => playerRef.current?.seekTo(msToFrame(ms, fps))} onCreateManual={() => set(newManualCaptions())} getPlayheadMs={() => ((playerRef.current?.getCurrentFrame() ?? 0) / fps) * 1000} onUpdate={update} onRemove={() => set(null)} onTranslate={translation.run} translating={translation.running} translateError={translation.error} />
     </div>
   );

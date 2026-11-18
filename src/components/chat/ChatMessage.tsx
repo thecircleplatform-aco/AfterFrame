@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Message, type KiteTheme } from '@kitelus/fly-ui';
 import { theme, themeAlpha } from '../../theme';
@@ -6,6 +6,8 @@ import { Icon } from '../../modules/icons';
 import { useT } from '../../i18n/locale';
 import type { AgentRetry, DisplayMessage } from '../../agent/agent-session';
 import { parseWidgets } from './widget-parse';
+import { parsePlans, type AssistantSegment, type PlanStep } from './plan-parse';
+import { PlanCard } from './PlanCard';
 import { WidgetCard } from './WidgetCard';
 import { Markdown } from './Markdown';
 import { ToolBadge, toolAccent, toolIcon, THINK_ACCENT, type ToolBadgeState } from './ToolBadge';
@@ -69,7 +71,12 @@ function ThinkingBlock({ text, active = false }: { text: string; active?: boolea
         <span style={{ display: 'inline-flex', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: 0.7 }}>▸</span>
       </button>
       {open && (
-        <Markdown text={text} style={{ marginTop: 4, maxHeight: 180, overflowY: 'auto', padding: '6px 8px', fontFamily: 'Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace', fontStyle: 'italic', fontSize: 11.5, lineHeight: 1.55, color: theme.textDim, whiteSpace: 'pre-wrap', background: theme.panelAlt, border: `0.5px solid ${theme.border}`, borderRadius: 4 }} />
+        /* Reasoning is supporting context, not output: no framed box, no italic.
+           A faint left rail keeps it visually grouped under the toggle, and the
+           text sits at reduced opacity so it recedes behind the real answer. */
+        <div style={{ marginTop: 6, marginLeft: 3, paddingLeft: 11, borderLeft: `1px solid ${theme.border}`, opacity: 0.55 }}>
+          <Markdown text={text} style={{ fontSize: 11.5, lineHeight: 1.55 }} />
+        </div>
       )}
     </div>
   );
@@ -84,11 +91,28 @@ interface ChatMessageProps {
   /** A resend action for this user turn, shown below the user's message. */
   retry?: AgentRetry;
   onRetry?: ((retry: AgentRetry) => void) | null;
+  /**
+   * Re-send the turn with different text. Opens the composer prefilled with this
+   * message instead of sending straight away.
+   */
+  onEdit?: ((retry: AgentRetry) => void) | null;
+  /** How many later exchanges this turn would discard if re-sent. */
+  laterTurns?: number;
   /** After the user fills out the <widget> form card and submits it, the assembled answer text is returned.*/
   onWidgetSubmit?: (answer: string) => void;
   widgetSubmitted?: boolean;
+  /**
+   * The same widget is being answered in the stepper docked above the composer.
+   * Render a one-line pointer instead of a second identical form.
+   */
+  widgetDocked?: boolean;
   /** maxTurns pauses the card "continue"; only the last continue card can be clicked (the old card is read-only)*/
   onContinue?: (() => void) | null;
+  /**
+   * Run a plan the model proposed. Absent on read-only hosts, in which case plan
+   * blocks fall back to plain markdown rather than showing a dead button.
+   */
+  onPlanRun?: ((steps: PlanStep[]) => void) | null;
   /** Open settings, optionally on a specific vendor page (used by the missing-model-pack action button). */
   onOpenSettings?: ((route?: string) => void) | null;
 }
@@ -97,13 +121,84 @@ function isMissingModelPacksResult(result: unknown): boolean {
   return !!result && typeof result === 'object' && (result as Record<string, unknown>).action === 'missing-model-packs';
 }
 
+/**
+ * Overflow actions under a sent message. Retry used to be the only one, which
+ * made it look like a plain reload button; the destructive part (rewinding the
+ * conversation and rolling back the agent's timeline edits) was invisible.
+ * Collapsing the actions behind "More" also keeps the transcript quiet.
+ */
+function UserMessageActions({
+  retry, running, laterTurns, onRetry, onEdit,
+}: {
+  retry: AgentRetry;
+  running: boolean;
+  laterTurns: number;
+  onRetry: (retry: AgentRetry) => void;
+  onEdit?: ((retry: AgentRetry) => void) | null;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const destructive = laterTurns > 0;
+
+  return (
+    <div className="cc-user-actions" ref={ref}>
+      <button type="button" className="cc-user-actions-trigger"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open} aria-haspopup="menu"
+        title={t('More options')} aria-label={t('More options')}>
+        <Icon name="more" size={14} />
+      </button>
+      {open && (
+        <div className="cc-user-actions-menu" role="menu">
+          {onEdit && (
+            <button type="button" role="menuitem" className="cc-user-actions-item"
+              disabled={running}
+              onClick={() => { setOpen(false); onEdit(retry); }}>
+              <Icon name="pencil" size={13} />
+              <span>{t('Edit and resend')}</span>
+            </button>
+          )}
+          <button type="button" role="menuitem"
+            className={`cc-user-actions-item${destructive ? ' is-destructive' : ''}`}
+            disabled={running}
+            onClick={() => { setOpen(false); onRetry(retry); }}>
+            <Icon name="undo" size={13} />
+            <span>{t('Resend from here')}</span>
+          </button>
+          {destructive && (
+            <p className="cc-user-actions-note">
+              {t('{n} later exchange(s) and the edits they made will be undone.', { n: String(laterTurns) })}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function missingPacksSettingsRoute(result: unknown): string | undefined {
   if (!isMissingModelPacksResult(result)) return undefined;
   const route = (result as Record<string, unknown>).settingsRoute;
   return typeof route === 'string' ? route : undefined;
 }
 
-export function ChatMessage({ msg, streaming, running = false, retry, onRetry, onWidgetSubmit, widgetSubmitted, onContinue, onOpenSettings }: ChatMessageProps) {
+export function ChatMessage({ msg, streaming, running = false, retry, onRetry, onEdit, laterTurns, onWidgetSubmit, widgetSubmitted, widgetDocked, onContinue, onOpenSettings, onPlanRun }: ChatMessageProps) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -149,10 +244,13 @@ export function ChatMessage({ msg, streaming, running = false, retry, onRetry, o
         />
         </div>
         {retry && onRetry && (
-          <button type="button" onClick={() => onRetry(retry)} title={t('Retry request')} disabled={running}
-            style={{ marginTop: 5, border: 'none', background: 'transparent', color: theme.textDim, borderRadius: 6, padding: '3px 6px', fontSize: 12, cursor: running ? 'default' : 'pointer', opacity: running ? 0.4 : 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span aria-hidden="true">↻</span>{t('Retry')}
-          </button>
+          <UserMessageActions
+            retry={retry}
+            running={running}
+            laterTurns={laterTurns ?? 0}
+            onRetry={onRetry}
+            onEdit={onEdit}
+          />
         )}
       </motion.div>
     );
@@ -167,18 +265,18 @@ export function ChatMessage({ msg, streaming, running = false, retry, onRetry, o
     // Previously, only the tool name was printed, which looked like repetition; add the distinguishing parameters (query/itemId/category...) for easy identification at a glance.
     const summary = toolArgSummary(tool.args);
     return (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, margin: '9px 0', color: theme.text, fontSize: 12.5 }}
+      <div className="cc-tool-row" data-state={badgeState}
         title={typeof tool.args === 'object' ? JSON.stringify(tool.args) : String(tool.args)}>
         <ToolBadge state={badgeState} accent={toolAccent(tool.name)} icon={toolIcon(tool.name)} />
         {/* Tool name + summary + error in a wrappable block: minWidth:0 to allow it to shrink within the flex parent,
 overflowWrap:anywhere breaks long tokens - long errors/summaries are wrapped in the panel, no longer cut off when a single line overflows.*/}
-        <span style={{ minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.45 }}>
-          <span style={{ fontFamily: 'Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace', letterSpacing: 0.2, color: theme.text, fontWeight: 500 }}>{tool.name}</span>
-          {summary && <span style={{ opacity: 0.75, color: theme.text }}> · {summary}</span>}
-          {!ok && <span style={{ color: theme.danger }}>：{String(r!.error)}</span>}
+        <span className="cc-tool-row-body">
+          <span className="cc-tool-row-name">{tool.name}</span>
+          {summary && <span className="cc-tool-row-args">{summary}</span>}
+          {!ok && <span className="cc-tool-row-error">{String(r!.error)}</span>}
           {!ok && onOpenSettings && isMissingModelPacksResult(r) && (
             <button type="button" onClick={() => onOpenSettings(missingPacksSettingsRoute(r))}
-              style={{ marginLeft: 8, border: `0.5px solid ${theme.accent}`, background: 'transparent', color: theme.accent, borderRadius: 6, padding: '2px 10px', fontSize: 12, cursor: 'pointer' }}>
+              className="cc-tool-row-action">
               {t('Install in Settings')}
             </button>
           )}
@@ -223,22 +321,44 @@ overflowWrap:anywhere breaks long tokens - long errors/summaries are wrapped in 
 
   // The <widget> form block may be embedded in the assistant text and needs to be separated into paragraphs to render separately.
   // The plain text segment uses lightweight Markdown (**bold** / `code` / list / code block), and no longer spits out ** to the user as it is
-  const segments = parseWidgets(msg.text);
+  //
+  // A <plan> block is split out first: plan mode returns one, and it has to be an
+  // actionable card rather than markdown the user cannot run.
+  const planParts = onPlanRun ? parsePlans(msg.text) : null;
+  const segments: AssistantSegment[] = planParts?.some((part) => part.type === 'plan')
+    ? planParts
+    : parseWidgets(msg.text);
   if (!segments.length && !msg.thinking?.trim()) return null;
   return (
     <div style={{ margin: '16px 0' }}>
       {!!msg.thinking?.trim() && <ThinkingBlock text={msg.thinking} active={!!streaming} />}
       {segments.map((seg, i) =>
-        seg.type === 'widget' ? (
-          <WidgetCard
+        seg.type === 'plan' ? (
+          <PlanCard
             key={i}
-            fields={seg.fields}
+            steps={seg.steps}
             title={seg.title}
-            submitLabel={seg.submitLabel}
-            messagePrefix={seg.messagePrefix}
-            persistedSubmitted={widgetSubmitted}
-            onSubmit={(answer) => onWidgetSubmit?.(answer)}
+            note={seg.note}
+            running={running}
+            onRun={(steps) => onPlanRun?.(steps)}
           />
+        ) : seg.type === 'widget' ? (
+          widgetDocked && !widgetSubmitted ? (
+            <div key={i} className="cc-widget-docked" role="note">
+              <Icon name="arrowUp" size={13} />
+              <span>{t('Answer below — the questions are docked above the message box.')}</span>
+            </div>
+          ) : (
+            <WidgetCard
+              key={i}
+              fields={seg.fields}
+              title={seg.title}
+              submitLabel={seg.submitLabel}
+              messagePrefix={seg.messagePrefix}
+              persistedSubmitted={widgetSubmitted}
+              onSubmit={(answer) => onWidgetSubmit?.(answer)}
+            />
+          )
         ) : (
           seg.text ? <Markdown key={i} text={seg.text} /> : null
         ),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import {
   getPreviewSourceMode,
   getQualityMode,
@@ -135,21 +135,6 @@ function stateFor(src: string | undefined, autoRequest: boolean): PreviewProxySt
   return entry.response.proxy;
 }
 
-function subscribe(sources: readonly string[], listener: () => void): () => void {
-  for (const src of sources) proxyEntry(src).listeners.add(listener);
-  return () => {
-    for (const src of sources) {
-      const entry = proxyEntries.get(src);
-      if (!entry) continue;
-      entry.listeners.delete(listener);
-      if (!entry.listeners.size && entry.promise) {
-        entry.controller?.abort();
-        if (proxyEntries.get(src) === entry) proxyEntries.delete(src);
-      }
-    }
-  };
-}
-
 function useQualitySnapshot() {
   // Separate stable snapshots: getSnapshot must return a cached value, or
   // useSyncExternalStore re-renders forever on every new object literal.
@@ -158,23 +143,26 @@ function useQualitySnapshot() {
   return { mode, preview };
 }
 
-function useProxySources(sources: readonly string[]): number {
-  const [revision, setRevision] = useState(0);
+/**
+ * Eagerly fetch the preview proxy for these sources when the quality policy
+ * expects one. Fetch state is tracked outside React, and every consumer already
+ * re-renders on its own when the entry settles (the `<video>` swaps src on
+ * error / `stateFor` is re-read on the next render), so this hook is
+ * intentionally effect-only: it must never call setState, or the
+ * subscribe → notify → setState → re-subscribe cycle re-enters forever and
+ * React throws "Maximum update depth exceeded".
+ */
+function useProxySources(sources: readonly string[]): void {
   const quality = useQualitySnapshot();
+  // `sources` is a fresh array on every render at most call sites, so depend on
+  // the joined key (a primitive) rather than the array identity.
+  const sourcesKey = sources.join('\u0000');
+  const { mode, preview } = quality;
   useEffect(() => {
-    const bump = () => setRevision((value) => value + 1);
-    const unsubscribe = subscribe(sources, bump);
-    // Only fetch proxies when policy/source mode expects them.
-    if (shouldAutoRequestPreviewProxy(quality.mode, quality.preview)) {
-      for (const src of sources) void requestPreviewProxy(src, quality.preview === 'proxy');
-    }
-    return unsubscribe;
-  }, [sources, quality.mode, quality.preview]);
-  // Re-resolve preview src when quality/preview-source mode flips even if proxy cache is quiet.
-  useEffect(() => {
-    setRevision((value) => value + 1);
-  }, [quality.mode, quality.preview]);
-  return revision;
+    if (!sourcesKey) return;
+    if (!shouldAutoRequestPreviewProxy(mode, preview)) return;
+    for (const src of sourcesKey.split('\u0000')) void requestPreviewProxy(src, preview === 'proxy');
+  }, [sourcesKey, mode, preview]);
 }
 
 function resolvePreviewSrc(src: string | undefined, proxy: PreviewProxyState): string | undefined {
@@ -185,7 +173,7 @@ function resolvePreviewSrc(src: string | undefined, proxy: PreviewProxyState): s
 export function usePreviewMediaSource(src: string | undefined, enabled = true) {
   const source = enabled && isPreviewable(src) ? src : '';
   const sources = useMemo(() => source ? [source] : [], [source]);
-  const revision = useProxySources(sources);
+  useProxySources(sources);
   const proxy = stateFor(source || undefined, shouldAutoRequestPreviewProxy());
   const previewSrc = resolvePreviewSrc(src, proxy);
   return {
@@ -196,7 +184,6 @@ export function usePreviewMediaSource(src: string | undefined, enabled = true) {
     requestFallback: useCallback(() => {
       if (source) reportPreviewPlaybackFailure(source);
     }, [source]),
-    revision,
   };
 }
 

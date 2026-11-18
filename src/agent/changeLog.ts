@@ -19,6 +19,13 @@ export interface AgentChangeSession {
   beforeDoc: ProjectDoc;
   afterRevision: string;
   rollbackable: boolean;
+  /**
+   * Identifier of the user turn whose run produced these edits. Used to tell the
+   * user exactly which changes a rewind takes back, instead of guessing by
+   * position (one turn can emit several sessions). Optional because chats
+   * persisted before this field existed still load.
+   */
+  turnId?: string;
 }
 
 export function createAgentChangeSession(
@@ -27,6 +34,7 @@ export function createAgentChangeSession(
   beforeDoc: ProjectDoc,
   afterDoc: ProjectDoc,
   rollbackable = true,
+  turnId?: string,
 ): AgentChangeSession {
   return {
     id: crypto.randomUUID(),
@@ -36,6 +44,7 @@ export function createAgentChangeSession(
     beforeDoc,
     afterRevision: revisionOf(afterDoc),
     rollbackable,
+    ...(turnId ? { turnId } : {}),
   };
 }
 
@@ -91,6 +100,7 @@ export function parseAgentChangeLog(value: unknown): AgentChangeSession[] {
       beforeDoc,
       afterRevision: item.afterRevision,
       rollbackable: item.rollbackable !== false,
+      ...(typeof item.turnId === 'string' && item.turnId ? { turnId: item.turnId } : {}),
     });
   }
   return sessions;

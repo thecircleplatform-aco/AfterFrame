@@ -101,6 +101,17 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
     ],
   },
   {
+    // Free tier (bring-your-own-key) vs hosted tier, plus the optional offline
+    // component installs. Rendered by a custom pane — `fields: []` because none
+    // of it is a server env key.
+    key: 'plan', title: 'Plans & keys', icon: 'sparkles',
+    groups: [
+      { key: 'plan', title: 'Plans & keys', hint: 'Run with your own API key, or use the hosted tier. Offline components download on demand.', vendors: [
+        { key: 'plan/tier', vendor: 'localasr', title: 'Plan and API keys', icon: 'sparkles', kind: 'local-models', fields: [] },
+      ] },
+    ],
+  },
+  {
     key: 'generation', title: 'AI generated', icon: 'image',
     groups: [
       { key: 'image', title: 'Image Generation', hint: 'submit_image · Text-to-image / image-to-image with any provider.',

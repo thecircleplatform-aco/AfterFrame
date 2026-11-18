@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { theme } from '../../theme';
 import { useT } from '../../i18n/locale';
 import { ChatMessage } from './ChatMessage';
 import { ToolBadge, toolAccent, toolIcon } from './ToolBadge';
@@ -17,19 +16,24 @@ export function ToolGroupRow({ name, items, onOpenSettings }: { name: string; it
   });
   const anyRunning = items.some(({ msg }) => !msg.tool?.result);
   return (
-    <div style={{ margin: '9px 0' }}>
+    <div className="cc-tool-row cc-tool-group">
       <button
+        type="button"
+        className="cc-tool-row-head"
         onClick={() => setOpen((o) => !o)}
         title={open ? t('Collapse') : t('Expand all')}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: theme.text, fontSize: 12.5, padding: 0, textAlign: 'left' }}
+        aria-expanded={open}
       >
         <ToolBadge state={anyRunning ? 'running' : anyError ? 'error' : 'done'} accent={toolAccent(name)} icon={toolIcon(name)} />
-        <span style={{ fontFamily: 'Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace', letterSpacing: 0.2, color: theme.text, fontWeight: 500 }}>{name}</span>
-        <span style={{ opacity: 0.75 }}>· {t('{n} calls', { n: items.length })}</span>
-        <span style={{ fontSize: 9, opacity: 0.7 }}>{open ? '▾' : '▸'}</span>
+        <span className="cc-tool-row-name">{name}</span>
+        <span className="cc-tool-row-count">{t('{n} calls', { n: items.length })}</span>
+        <span className={`cc-tool-row-chevron${open ? ' is-open' : ''}`} aria-hidden="true">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        </span>
       </button>
       {open && (
-        <div style={{ marginLeft: 3, paddingLeft: 9, borderLeft: `0.5px solid ${theme.border}` }}>
+        <div className="cc-tool-row-nest">
           {items.map(({ msg, index }) => (
             <ChatMessage key={index} msg={msg} onOpenSettings={onOpenSettings} />
           ))}

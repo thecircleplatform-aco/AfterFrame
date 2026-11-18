@@ -17,6 +17,7 @@ import { AppToastHost } from '../ui/AppToastHost';
 import {
   DesignStylePanel, ExportDialog, SettingsDialog, ShortcutsDialog, VersionHistory,
 } from './workspaceDialogs';
+import { VaultDialog } from '../vault/VaultDialog';
 import { useWorkspaceDialogPrefetch } from './workspaceDialogLoaders';
 
 export interface EditorWorkspaceViewProps {
@@ -28,6 +29,7 @@ export interface EditorWorkspaceViewProps {
   versionHistory: ComponentProps<typeof VersionHistory> | null;
   shortcutsDialog: ComponentProps<typeof ShortcutsDialog> | null;
   settingsDialog: ComponentProps<typeof SettingsDialog> | null;
+  vaultDialog: { onClose: () => void } | null;
   chatPanel: ComponentProps<typeof ChatPanel>;
   chatCollapsed: boolean;
   onResizeChat: ComponentProps<typeof Divider>['onResize'];
@@ -70,6 +72,9 @@ export function EditorWorkspaceView(props: EditorWorkspaceViewProps) {
   // The library column moved into the bottom sheet, so its track (and the
   // divider beside it) collapse to zero and the preview gets the whole width.
   const workColumns = `0px 0 ${splitTracks(props.gridTemplateColumns).slice(-1).join(' ') || '1fr'}`;
+  // The work card is placed at `gridRow: 2 / -1`, so it does NOT own the top-bar
+  // row — its first track is the preview. Keep all remaining tracks verbatim
+  // (preview, divider, timeline) so row 1 here maps to outer row 2.
   const workRows = splitTracks(props.gridTemplateRows).slice(1).join(' ') || '1fr';
   // The chat is a dock section now, so neither it nor the library occupies a
   // grid track: the two leading tracks collapse and the work card — still placed
@@ -96,6 +101,7 @@ export function EditorWorkspaceView(props: EditorWorkspaceViewProps) {
       <Suspense fallback={null}>
         {props.exportDialog && <ExportDialog {...props.exportDialog} />}
         {props.settingsDialog && <SettingsDialog {...props.settingsDialog} />}
+        {props.vaultDialog && <VaultDialog onClose={props.vaultDialog.onClose} />}
         {props.designStylePanel && <DesignStylePanel {...props.designStylePanel} />}
         {props.versionHistory && <VersionHistory {...props.versionHistory} />}
         {props.shortcutsDialog && <ShortcutsDialog {...props.shortcutsDialog} />}
@@ -122,10 +128,18 @@ export function EditorWorkspaceView(props: EditorWorkspaceViewProps) {
           background: theme.panel,
         }}
       >
-        {/* Preview panel (and its 30px header) removed: the upper work area and
-            its resize divider collapse so the timeline fills the whole card. */}
-        <div style={{ gridColumn: 1, gridRow: 1, minHeight: 0, minWidth: 0, overflow: 'hidden' }} />
-        <div style={{ gridColumn: 2, gridRow: 1 }} />
+        {/* The work card's own grid is [preview, divider, timeline]; the outer
+            top-bar row is not part of it (the card starts at gridRow 2). */}
+        <div style={{ gridColumn: '1 / -1', gridRow: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', height: '100%' }}>
+          <div className="cc-preview-workspace">
+            <PreviewPanel {...props.previewPanel} />
+            {props.inspectorPanel && <InspectorPanel {...props.inspectorPanel} />}
+          </div>
+        </div>
+        {/* Drag handle between preview and timeline. */}
+        <div style={{ gridColumn: '1 / -1', gridRow: 2, minHeight: 0 }}>
+          <Divider orientation="horizontal" onResize={props.onResizeTimeline} />
+        </div>
         <div style={{ gridColumn: '1 / -1', gridRow: 3, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <TimelineTabs {...props.timelineTabs} />
           <Timeline {...props.timeline} />

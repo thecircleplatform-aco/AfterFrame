@@ -1,0 +1,4 @@
+{
+  "error": "server_unavailable",
+  "message": "The AfterFrame backend is not running on this host. Editor features that need local processing (media probing, frame extraction, settings) require the desktop app or a self-hosted server."
+}

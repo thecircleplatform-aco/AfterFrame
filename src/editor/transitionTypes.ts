@@ -1,4 +1,9 @@
 import type { TrackId } from './trackTypes.js';
+import {
+  EXTENDED_TRANSITION_IDS,
+  TRANSITION_LABELS_EXTENDED,
+  type ExtendedTransitionType,
+} from '../gl/extendedTransitions.generated.js';
 
 /** transitions with a CSS fallback for non-texturable DOM clips. */
 export type CssTransitionType =
@@ -9,8 +14,8 @@ export type CssTransitionType =
   | 'flash'
   | 'luma-blend';
 
-/** these video transitions run their real GLSL for video/image clips. */
-export type GlslTransitionType =
+/** the hand-written original sixteen video transitions. */
+export type CoreTransitionType =
   | CssTransitionType
   | 'page-curl'
   | 'rack-focus'
@@ -22,6 +27,12 @@ export type GlslTransitionType =
   | 'radial-blur'
   | 'glitch-cut'
   | 'dip-to-color';
+
+/** these video transitions run their real GLSL for video/image clips.
+ *  ExtendedTransitionType is generated from scripts/lib/transition-catalog.mjs. */
+export type GlslTransitionType =
+  | CoreTransitionType
+  | ExtendedTransitionType;
 
 /** Audio-only transitions (preset `trAudioCrossFade`) — no picture. */
 export type AudioTransitionType = 'audio-cross-fade';
@@ -35,6 +46,7 @@ export const GLSL_TRANSITION_TYPES: ReadonlySet<string> = new Set<string>([
   'cross-dissolve', 'dip-to-black', 'soft-wipe', 'whip-pan', 'flash', 'luma-blend',
   'page-curl', 'rack-focus', 'organic-dissolve', 'impact-shake', 'anticipation-zoom', 'clean-line-wipe',
   'circle-wipe', 'radial-blur', 'glitch-cut', 'dip-to-color',
+  ...EXTENDED_TRANSITION_IDS,
   'custom-shader', // takes the GL render path; frag comes from the item, not GLSL_TRANSITIONS
 ]);
 
@@ -77,6 +89,7 @@ export const TRANSITION_LABELS: Record<TransitionType, string> = {
   'audio-cross-fade': 'Audio Cross-Fade',
   /** submit_shader-generated custom transition (per-item label in customLabel) */
   'custom-shader': 'Custom Shader',
+  ...TRANSITION_LABELS_EXTENDED,
 };
 
 /** catalog display order + extended visual transitions. */
@@ -97,6 +110,7 @@ export const TRANSITION_ORDER: readonly GlslTransitionType[] = [
   'radial-blur',
   'glitch-cut',
   'dip-to-color',
+  ...EXTENDED_TRANSITION_IDS,
 ];
 
 /** Audio transition catalog (trAudioCrossFade). */

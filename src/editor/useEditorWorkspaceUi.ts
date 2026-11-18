@@ -46,6 +46,9 @@ export interface EditorWorkspaceDialogs {
   setShowShortcuts: Dispatch<SetStateAction<boolean>>;
   showSettings: boolean;
   setShowSettings: Dispatch<SetStateAction<boolean>>;
+  /** The storage-folder (vault) dialog: where projects and media live on disk. */
+  showVault: boolean;
+  setShowVault: Dispatch<SetStateAction<boolean>>;
   /** Settings vendor key to open on the next settings dialog mount (e.g. 'local/music/packs'). */
   settingsRoute: string | undefined;
   setSettingsRoute: Dispatch<SetStateAction<string | undefined>>;
@@ -67,6 +70,7 @@ export function useEditorWorkspaceDialogs({
   const [chatSeed, setChatSeed] = useState<EditorChatSeed | null>(null);
   const [showDesign, setShowDesign] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showVault, setShowVault] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
 
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -83,6 +87,8 @@ export function useEditorWorkspaceDialogs({
     setShowDesign,
     showSettings,
     setShowSettings,
+    showVault,
+    setShowVault,
     settingsRoute,
     setSettingsRoute,
     showVersions,
@@ -144,6 +150,7 @@ interface EditorWorkspaceExportActionsInput {
   setShowDesign: Dispatch<SetStateAction<boolean>>;
   setShowVersions: Dispatch<SetStateAction<boolean>>;
   setShowShortcuts: Dispatch<SetStateAction<boolean>>;
+  setShowVault: Dispatch<SetStateAction<boolean>>;
   setChatCollapsed: Dispatch<SetStateAction<boolean>>;
   selectAllTimelineContent: () => void;
 }
@@ -216,6 +223,7 @@ export function useEditorWorkspaceExportActions(
     openExport: onExport,
     openDesign: () => input.setShowDesign(true),
     openHistory: () => input.setShowVersions(true),
+    openVault: () => input.setShowVault(true),
     openShortcuts: () => input.setShowShortcuts(true),
     toggleLayout: () => input.setChatCollapsed((value) => !value),
     focusAgent: () => {

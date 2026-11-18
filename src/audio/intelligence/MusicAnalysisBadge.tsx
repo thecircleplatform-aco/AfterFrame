@@ -301,13 +301,72 @@ function AnalysisAction({ asset, state }: { asset: MediaAsset; state: MusicAnaly
   return <div className="cc-music-analysis-actions"><button type="button" className="cc-music-analysis-action" disabled={!canAnalyze} onClick={run}>{label}</button></div>;
 }
 
+/**
+ * Shown when the analysis packs are absent.
+ *
+ * It installs them rather than explaining where the user could install them:
+ * both packs are SHA-256 pinned and downloaded through the same verified path the
+ * Settings pane uses, so refusing here ("this control never downloads them
+ * automatically") was an arbitrary restriction that left users stuck.
+ */
+function MissingPacksContent() {
+  const t = useT();
+  const [phase, setPhase] = useState<'idle' | 'installing' | 'failed' | 'done'>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  if (phase === 'done') {
+    return <p className="cc-music-analysis-state">{t('Models installed. Reopen this menu to analyze.')}</p>;
+  }
+
+  const install = async (): Promise<void> => {
+    setPhase('installing');
+    setError(null);
+    try {
+      for (const id of ['rhythm-pack', 'music-semantics-pack']) {
+        const response = await fetch('/api/deps/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null) as { error?: string } | null;
+          throw new Error(body?.error ?? `install failed (HTTP ${response.status})`);
+        }
+      }
+      setPhase('done');
+    } catch (failure) {
+      setPhase('failed');
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  };
+
+  return (
+    <>
+      <p className="cc-music-analysis-state">
+        {phase === 'installing'
+          ? t('Installing the music-analysis models. This runs in the background.')
+          : phase === 'failed'
+            ? t('Could not install the models: {reason}', { reason: error ?? '' })
+            : t('Music analysis needs two local model packs (~118 MB, downloaded once).')}
+      </p>
+      {phase !== 'installing' && (
+        <div className="cc-music-analysis-actions">
+          <button type="button" className="cc-music-analysis-action" onClick={() => { void install(); }}>
+            {phase === 'failed' ? t('Retry') : t('Install models')}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 function AnalysisContent({ state }: { state: MusicAnalysisCardState }) {
   const t = useT();
   if (state.state === 'ready') return <ReadyAnalysis analysis={state.analysis} />;
   if (state.state === 'running') return <p className="cc-music-analysis-state">{phaseLabel(state.phase, t)} · {Math.round(state.progress * 100)}%<progress className="cc-music-analysis-progress" max={1} value={state.progress} /></p>;
   if (state.state === 'queued') return <p className="cc-music-analysis-state">{t('Added to the local analysis queue.')}</p>;
   if (state.state === 'error') return <p className="cc-music-analysis-state error">{t('Analysis failed: {message}', { message: state.message })}</p>;
-  if (state.state === 'unavailable') return <p className="cc-music-analysis-state">{t('The required model packs are not installed. Download the rhythm and music semantics models separately in Local AI settings; this control never downloads them automatically.')}</p>;
+  if (state.state === 'unavailable') return <MissingPacksContent />;
   if (state.state === 'checking') return <p className="cc-music-analysis-state">{t('Checking local models…')}</p>;
   return <p className="cc-music-analysis-state">{t('Analyze rhythm, structure, and music meaning on this device. Audio is never uploaded.')}</p>;
 }

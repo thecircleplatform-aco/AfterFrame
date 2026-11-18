@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web/webgpu';
 import ortJsepWasmUrl from '../../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm?url';
+import { runtimeAsset, usesRemoteRuntimeAssets } from '../../tier/assets';
 import {
   BEAT_THIS_BORDER_FRAMES,
   BEAT_THIS_CHUNK_FRAMES,
@@ -26,7 +27,14 @@ const MAX_SAMPLES = BEAT_THIS_SAMPLE_RATE * 60 * 60;
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
 ort.env.logLevel = 'error';
-ort.env.wasm.wasmPaths = { wasm: ortJsepWasmUrl };
+// Hosted builds stream the 26 MB JSEP kernel from R2 instead of the bundle (the
+// `?url` import above still exists, so local dev and desktop keep the bundled
+// copy). Same binary, one fewer megabyte pile in the Pages upload.
+ort.env.wasm.wasmPaths = {
+  wasm: usesRemoteRuntimeAssets()
+    ? runtimeAsset('/ort/ort-wasm-simd-threaded.jsep.wasm')
+    : ortJsepWasmUrl,
+};
 
 type Backend = 'webgpu' | 'wasm';
 type AnalyzeRequest = { readonly id: number; readonly type: 'analyze'; readonly backend: Backend; readonly samples: Float32Array };

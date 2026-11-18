@@ -1,9 +1,11 @@
 import type { CSSProperties } from 'react';
 
-// Same product-identity gradient as the agent chat rim (index.css `.cc-chat-panel::after`).
-// It lives here rather than in a theme token because the brand gradient is deliberately
-// skin-independent: no skin may recolour it.
-const RIM_GRADIENT = 'linear-gradient(120deg,#a855f7,#ec4899,#3b82f6,#22d3ee,#a855f7)';
+// Product-identity edged surfaces used to be framed by an animated rainbow
+// gradient. That read as decoration on every card and fought the content, so the
+// rim is now a plain hairline in the surrounding border colour. The component is
+// kept (rather than deleted) because it is the one place the frame radius and
+// z-index live — callers do not need to change.
+const RIM_COLOR = 'var(--cc-border)';
 
 export interface BrandRimProps {
   /** `live` speeds the drift up and brightens the rim (agent working, export running…). */
@@ -26,15 +28,10 @@ export function BrandRim({ tone = 'soft', radius = 0, variant = 'inset' }: Brand
     inset: 0,
     zIndex: 30,
     pointerEvents: 'none',
-    padding: 1.25,
+    padding: 1,
     borderRadius: radius,
-    backgroundImage: RIM_GRADIENT,
-    backgroundSize: '400% 400%',
-    WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-    WebkitMaskComposite: 'xor',
-    mask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-    maskComposite: 'exclude',
-    opacity: tone === 'live' ? 0.9 : 0.6,
+    backgroundImage: RIM_COLOR,
+    opacity: 1,
   };
   return (
     <span

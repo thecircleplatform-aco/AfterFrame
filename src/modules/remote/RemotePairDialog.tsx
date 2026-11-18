@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toDataURL } from 'qrcode';
 import { Icon } from '../../modules/icons';
+import { AfterFrameMark } from '../../components/brand/afterframe-mark';
 import { useT } from '../../i18n/locale';
 import type { RemoteAddress } from './remoteControlApi';
 import type { RemoteControlHost } from './useRemoteControlHost';
@@ -31,36 +32,73 @@ function addressLabel(address: RemoteAddress): string {
 function PairBody({ host }: { host: RemoteControlHost }) {
   const t = useT();
   const session = host.session!;
-  const [selected, setSelected] = useState(session.addresses[0]?.url ?? '');
+  // A public tunnel URL works off-Wi-Fi and is HTTPS (camera/QR need a secure
+  // context), so it is the better default; the LAN list stays as the fallback
+  // for when no tunnel is configured or the phone wants a direct route.
+  const [selected, setSelected] = useState(
+    session.publicAddress?.url ?? session.addresses[0]?.url ?? '',
+  );
   const [now, setNow] = useState(Date.now());
   const { dataUrl: qrDataUrl, error: qrError } = useQrDataUrl(selected);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), CLOCK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
+  // The session refreshes addresses as adapters come and go; keep a valid pick.
+  const options = [
+    ...(session.publicAddress
+      ? [{ url: session.publicAddress.url, label: `${t('Public link')} · ${session.publicAddress.host}`, public: true }]
+      : []),
+    ...session.addresses.map((address) => ({ url: address.url, label: addressLabel(address), public: false })),
+  ];
+  const active = options.some((option) => option.url === selected) ? selected : (options[0]?.url ?? '');
+  const activeIsPublic = options.find((option) => option.url === active)?.public ?? false;
   const seconds = Math.max(0, Math.ceil((session.expiresAt - now) / CLOCK_INTERVAL_MS));
   const copyLink = () => {
-    void navigator.clipboard.writeText(selected)
-      .catch(() => { window.prompt(t('Copy failed. Copy the link manually.'), selected); });
+    void navigator.clipboard.writeText(active)
+      .catch(() => { window.prompt(t('Copy failed. Copy the link manually.'), active); });
   };
   return <div className="cc-remote-pair-body">
     <div className="cc-remote-pair-qr">
-      {qrDataUrl
-        ? <img src={qrDataUrl} alt={t('Phone remote QR code')} />
-        : <span>{t(qrError ? 'Could not generate the QR code. Copy the link instead.' : 'Generating QR code…')}</span>}
+      {qrDataUrl && (
+        /* The brand mark sits in the centre of the code. A white pad is drawn
+           behind it so the modules underneath are cleared rather than blended:
+           a logo laid straight onto the pattern can darken modules and make the
+           code unscannable. Level-M error correction tolerates ~15% loss, and
+           this badge is ≈5% of the area, so it stays reliably readable. */
+        <>
+          <img src={qrDataUrl} alt={t('Phone remote QR code')} />
+          <span className="cc-remote-pair-qr-mark" aria-hidden="true">
+            <span className="cc-remote-pair-qr-mark-inner">
+              <AfterFrameMark size={15} />
+            </span>
+          </span>
+        </>
+      )}
+      {!qrDataUrl && <span>{t(qrError ? 'Could not generate the QR code. Copy the link instead.' : 'Generating QR code…')}</span>}
     </div>
     <div className="cc-remote-pair-side">
       <ol>
-        <li>{t('Put the phone and this computer on the same Wi-Fi or hotspot')}</li>
-        <li>{t('Scan the QR code on the left with your phone camera')}</li>
+        {activeIsPublic
+          ? <>
+            <li>{t('Scan the QR code on the left with your phone camera')}</li>
+            <li>{t('No Wi-Fi needed — the public link works on mobile data')}</li>
+          </>
+          : <li>{t('Put the phone and this computer on the same Wi-Fi or hotspot')}</li>}
         <li>{t('Then send prompts from the phone and watch the results live')}</li>
       </ol>
-      {session.addresses.length > 1 && <label>{t('Local network address')}
-        <select value={selected} onChange={(event) => setSelected(event.target.value)}>
-          {session.addresses.map((address) => <option key={address.url} value={address.url}>{addressLabel(address)}</option>)}
+      {activeIsPublic
+        ? <div className="cc-remote-pair-public">
+          <span className="cc-remote-pair-public-badge">{t('Public')}</span>
+          {t('Works anywhere. Add it to your home screen to open it like an app.')}
+        </div>
+        : <p className="cc-remote-pair-timer">{t('Local network only — set a public tunnel to use mobile data.')}</p>}
+      {options.length > 1 && <label>{t('Connection')}
+        <select value={active} onChange={(event) => setSelected(event.target.value)}>
+          {options.map((option) => <option key={option.url} value={option.url}>{option.label}</option>)}
         </select>
       </label>}
-      <div className="cc-remote-pair-link"><code>{selected}</code><button type="button" onClick={copyLink}>{t('Copy link')}</button></div>
+      <div className="cc-remote-pair-link"><code>{active}</code><button type="button" onClick={copyLink}>{t('Copy link')}</button></div>
       <p className="cc-remote-pair-timer">{seconds > 0 ? t('Channel closes in {seconds} seconds', { seconds }) : t('The remote channel expired. Close this and try again.')}</p>
       <div className={host.guestCount > 0 ? 'cc-remote-pair-status live' : 'cc-remote-pair-status'}>
         <span className="cc-remote-pair-dot" />

@@ -187,7 +187,12 @@ export function computeCaps(): Caps {
       (getKey("PREFERRED_TRANSCRIPTION_PROVIDER") === "elevenlabs" && has("ELEVENLABS_API_KEY")) ||
       (getKey("PREFERRED_TRANSCRIPTION_PROVIDER") === "cartesia" && has("CARTESIA_API_KEY")),
     sandbox: has("E2B_API_KEY"),
-    web: has("FIRECRAWL_API_KEY"),
+    // "web" means basic search/page reading is usable. Parallel Search MCP is
+    // anonymous — it needs no key — so gating purely on FIRECRAWL_API_KEY
+    // reported web as unavailable on a keyless install even after the user set
+    // WEB_SEARCH_PROVIDER=parallel. The agent then refused to search, or wasted
+    // a turn discovering "not configured", while a working provider was enabled.
+    web: has("FIRECRAWL_API_KEY") || getKey("WEB_SEARCH_PROVIDER") === "parallel",
     storage:
       !isIsolatedDevProfile() &&
       has("R2_ACCOUNT_ID") &&
@@ -252,7 +257,13 @@ export async function setKeys(patch: Record<string, unknown>): Promise<void> {
   );
   const isolated = isIsolatedDevProfile(ACTIVE_PROFILE);
   const merged = mergeEnvText(existing, clean, isolated);
-  await atomicWriteFile(ENV_PATH, merged, { mode: 0o600 });
+  // Only touch the file when the bytes actually differ. Vite watches .env.local
+  // and restarts the dev server on every change, so a no-op write (e.g. the
+  // xAI OAuth session re-seeding an unchanged token at startup) would restart
+  // the server, whose startup writes again — an endless restart loop.
+  if (merged !== existing) {
+    await atomicWriteFile(ENV_PATH, merged, { mode: 0o600 });
+  }
   for (const [name, v] of clean) {
     if (v) {
       store.set(name, v);

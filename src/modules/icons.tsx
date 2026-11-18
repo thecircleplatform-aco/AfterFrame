@@ -2,7 +2,7 @@
 // toolbar/track-header glyphs — replaces emoji for a consistent editor chrome.
 
 export type IconName =
-  | 'plus' | 'cursor' | 'trim' | 'rateStretch' | 'blade' | 'scissors' | 'magnet' | 'mic' | 'chevronDown' | 'check' | 'brush' | 'cloud' | 'insert'
+  | 'plus' | 'cursor' | 'trim' | 'rateStretch' | 'blade' | 'scissors' | 'magnet' | 'mic' | 'chevronDown' | 'chevronUp' | 'check' | 'brush' | 'cloud' | 'insert'
   | 'play' | 'pause' | 'text' | 'copy' | 'trash' | 'bookmark' | 'prev' | 'next'
   | 'zoomOut' | 'zoomIn' | 'fit' | 'aspect' | 'captions' | 'fullscreen'
   | 'eye' | 'eyeOff' | 'volume' | 'volumeOff' | 'lock' | 'unlock'
@@ -14,10 +14,14 @@ export type IconName =
   | 'search' | 'upload' | 'folder' | 'folderPlus' | 'grid' | 'list' | 'sort' | 'filter' | 'more' | 'bug'
   | 'moreVertical' | 'bell' | 'menu'
   | 'palette' | 'wand' | 'tracking' | 'qrCode' | 'info' | 'brain' | 'agentMark'
-  | 'globe' | 'logout';
+  | 'globe' | 'logout' | 'arrowheadUp' | 'arrowheadDown';
 
-// stroke path(s) per icon; a few are fill-based (play/pause/cursor/bookmark)
-const FILL = new Set<IconName>(['play', 'pause', 'cursor', 'bookmark']);
+// stroke path(s) per icon; a few are fill-based (play/pause/cursor/bookmark).
+// The arrowheads are solid triangles — a stroke outline reads as a chevron with
+// a stem, which is not the shape these controls want.
+const FILL = new Set<IconName>([
+  'play', 'pause', 'cursor', 'bookmark', 'arrowheadUp', 'arrowheadDown',
+]);
 
 const P: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
@@ -33,6 +37,11 @@ const P: Record<IconName, string> = {
   mic: 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a7 7 0 0 0 14 0 M12 19v3',
   insert: 'M5 5v14 M19 5v14 M12 8v8 M9 12h6',
   chevronDown: 'M6 9l6 6 6-6',
+  chevronUp: 'M18 15l-6-6-6 6',
+  // Solid arrowheads: triangle apex only, no tail — scaled slightly inside the
+  // 24-box so the point is not clipped at small sizes.
+  arrowheadUp: 'M12 6.5l5.5 8.5H6.5z',
+  arrowheadDown: 'M12 17.5l5.5-8.5H6.5z',
   check: 'M20 6L9 17l-5-5',
   // lucide globe (language switcher)
   globe: 'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0 M3 12h18 M12 3a15 15 0 0 1 0 18 M12 3a15 15 0 0 0 0 18',

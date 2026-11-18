@@ -1,6 +1,8 @@
 export interface WidgetOption {
   value: string;
   display: string;
+  /** Optional one-line hint shown under the label. */
+  description?: string;
 }
 
 interface FieldBase {
@@ -109,10 +111,15 @@ function parseAttrs(raw: string): Record<string, string> {
 function parseOptions(raw: string | undefined): WidgetOption[] {
   if (!raw) return [];
   return raw.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
-    const separator = entry.indexOf('|');
-    return separator < 0
-      ? { value: entry, display: entry }
-      : { value: entry.slice(0, separator).trim(), display: entry.slice(separator + 1).trim() };
+    // `value|label|description` — the third segment is optional and only used
+    // for the hint line, so older `value|label` lists keep working unchanged.
+    const parts = entry.split('|').map((part) => part.trim());
+    if (parts.length === 1) return { value: parts[0], display: parts[0] };
+    return {
+      value: parts[0],
+      display: parts[1] || parts[0],
+      description: parts.length > 2 ? parts.slice(2).join('|') || undefined : undefined,
+    };
   }).filter((option) => option.value && option.display);
 }
 

@@ -31,6 +31,11 @@ export interface DisplayMessage {
   thinking?: string;
   retry?: AgentRetry;
   tool?: { name: string; args: unknown; result: unknown };
+  /**
+   * Stable id for a user turn. Change sessions the run writes carry the same id,
+   * so a rewind can name exactly the timeline edits it undoes.
+   */
+  turnId?: string;
 }
 
 export function createAgentRetry(

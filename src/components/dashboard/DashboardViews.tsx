@@ -569,7 +569,7 @@ function HomeBottomNav({ model, onHome }: { model: DashboardModel; onHome: () =>
     onFocus: () => setHovered(id),
     onBlur: () => setHovered(null),
   });
-  // FreeCut's rail: a full-width centred wrapper with a capped pill inside, and
+  
   // equal-flex capsules that stack icon over label. Nothing here is a fixed
   // width, so the nav fits any screen instead of running off the edge.
   const tabs: { id: string; icon: Parameters<typeof Icon>[0]['name']; label: string; onActivate: () => void }[] = [

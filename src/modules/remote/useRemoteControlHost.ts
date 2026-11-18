@@ -23,6 +23,8 @@ export interface RemoteControlHostOptions {
   readonly onStop: () => void;
   /** A phone attached an image; the file is already downloaded as a Blob. */
   readonly onImage: (file: File) => void | Promise<void>;
+  /** A phone asked for (or stopped) the live preview stream. */
+  readonly onWatch: (watching: boolean) => void;
   readonly readSnapshot: () => RemoteSnapshot;
 }
 
@@ -57,10 +59,12 @@ export function useRemoteControlHost(options: RemoteControlHostOptions): RemoteC
   const onPrompt = useRef(options.onPrompt);
   const onStop = useRef(options.onStop);
   const onImage = useRef(options.onImage);
+  const onWatch = useRef(options.onWatch);
   const readSnapshot = useRef(options.readSnapshot);
   onPrompt.current = options.onPrompt;
   onStop.current = options.onStop;
   onImage.current = options.onImage;
+  onWatch.current = options.onWatch;
   readSnapshot.current = options.readSnapshot;
 
   const sessionId = session?.id ?? null;
@@ -98,6 +102,9 @@ export function useRemoteControlHost(options: RemoteControlHostOptions): RemoteC
       (action) => {
         if (action.type === 'prompt') onPrompt.current(action.text);
         else if (action.type === 'stop') onStop.current();
+        else if (action.type === 'watch' || action.type === 'unwatch') {
+          onWatch.current(action.type === 'watch');
+        }
         else if (action.type === 'image') {
           // The bytes are already saved next to every other upload; pulling them
           // back as a File makes a phone photo an ordinary media-pool import.

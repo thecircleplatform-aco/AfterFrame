@@ -82,7 +82,7 @@ export function useEditorPanelLayout(chatCollapsed: boolean): EditorPanelLayout 
     DEFAULT_TIMELINE_RATIO,
   );
 
-  const { chatRatio, libraryRatio } = normalizeRatios(
+  const { chatRatio, libraryRatio, timelineRatio } = normalizeRatios(
     storedChatRatio,
     storedLibraryRatio,
     storedTimelineRatio,
@@ -90,9 +90,11 @@ export function useEditorPanelLayout(chatCollapsed: boolean): EditorPanelLayout 
 
   const chatTrack = chatCollapsed ? `${COLLAPSED_CHAT_WIDTH}px` : `${chatRatio * 100}vw`;
   const gridTemplateColumns = `${chatTrack} 0 ${libraryRatio * 100}vw 0 minmax(0, 1fr)`;
-  // The preview panel is gone, so its row and the divider row collapse to zero
-  // and the timeline takes the whole height of the work card.
-  const gridTemplateRows = `${HEADER_HEIGHT}px 0 0 minmax(0, 1fr)`;
+  // Row 1 top bar, row 2 preview (timelineRatio is the TIMELINE's share, so the
+  // preview takes whatever is left), row 3 the drag divider, row 4 the timeline.
+  // The timeline keeps a real minimum so a short viewport cannot squeeze it away.
+  const timelinePct = Math.round(timelineRatio * 1000) / 10;
+  const gridTemplateRows = `${HEADER_HEIGHT}px minmax(${MIN_UPPER_RATIO * 100}px, 1fr) 0 minmax(${MIN_TIMELINE_RATIO * 100}px, ${timelinePct}%)`;
 
   const resizeChat = (delta: number) => setChatRatio((current) => roundRatio(clamp(
     finiteRatio(current, DEFAULT_CHAT_RATIO) + delta / viewportWidth(),

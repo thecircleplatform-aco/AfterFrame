@@ -23,6 +23,8 @@ import { extractAudioPlugin } from "./extract-audio.ts";
 import { hfProxyPlugin } from "./hf-proxy.ts";
 import { asrModelsPlugin } from "./asr-models.ts";
 import { modelPacksPlugin } from "./model-packs.ts";
+import { dependenciesPlugin } from "./dependencies.ts";
+import { vaultPlugin } from "./vault.ts";
 import { assemblyAiUploadPlugin } from "./assemblyai-upload.ts";
 import { transcriptionPlugin } from "./transcription.ts";
 import { extractFramesPlugin } from "./extract-frames.ts";
@@ -114,6 +116,8 @@ export function serverPlugins(options: { projectStoreHttp?: boolean } = {}): Plu
     hfProxyPlugin(),
     asrModelsPlugin(),
     modelPacksPlugin(),
+    dependenciesPlugin(),
+    vaultPlugin(),
     assemblyAiUploadPlugin(),
     transcriptionPlugin(transcriptionOptions()),
     extractFramesPlugin(),

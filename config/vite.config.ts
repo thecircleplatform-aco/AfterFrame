@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, searchForWorkspaceRoot, type Plugin } from 'vite';
 import { parse as parseDotenv } from 'dotenv';
 import react from '@vitejs/plugin-react';
-import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { serverPlugins } from '../server/plugins/index.ts';
 import { seedKeystore, getKey } from '../server/keystore.ts';
@@ -30,6 +30,17 @@ export function applyAuthoritativeLocalProvider(
 // as a second belt-and-suspenders guard).
 const USER_MEDIA_IN_BUILD = ['media/uploads', 'media/asr-models'];
 
+/**
+ * Heavy inference binaries served from R2 in the hosted build.
+ *
+ * When VITE_RUNTIME_ASSETS_URL is set, `runtimeAsset()` points every consumer at
+ * the bucket, so shipping the local copies is dead weight (and the MediaPipe WASM
+ * is what pushes `dist` past what Pages will accept in a single upload). When it
+ * is unset -- local dev, desktop, self-hosted -- nothing is pruned and the
+ * same-origin files keep working.
+ */
+const REMOTE_RUNTIME_IN_BUILD = ['mediapipe', 'models/silero-vad'];
+
 function excludeUserMediaFromBuild(): Plugin {
   let outDir = resolve(process.cwd(), 'dist');
   return {
@@ -41,7 +52,27 @@ function excludeUserMediaFromBuild(): Plugin {
       outDir = config.build.outDir;
     },
     closeBundle() {
-      for (const rel of USER_MEDIA_IN_BUILD) {
+      const prune = [...USER_MEDIA_IN_BUILD];
+      // Only drop the inference binaries when they are actually served from R2.
+      if (process.env.VITE_RUNTIME_ASSETS_URL) prune.push(...REMOTE_RUNTIME_IN_BUILD);
+      // ONNX Runtime kernels are emitted into assets/ by the bundler (the worker
+      // imports them with `?url`). Hosted builds stream them from R2 instead, so
+      // remove the emitted copies by filename signature rather than hash.
+      if (process.env.VITE_RUNTIME_ASSETS_URL) {
+        const assetsDir = resolve(outDir, 'assets');
+        if (existsSync(assetsDir)) {
+          for (const entry of readdirSync(assetsDir)) {
+            if (!/^ort-wasm.*\.wasm$/.test(entry)) continue;
+            try {
+              rmSync(resolve(assetsDir, entry), { force: true });
+              process.stdout.write(`[vite] pruned ONNX kernel from build output: assets/${entry}\n`);
+            } catch {
+              // Never fail a build over cleanup.
+            }
+          }
+        }
+      }
+      for (const rel of prune) {
         const target = resolve(outDir, rel);
         if (existsSync(target)) {
           try {
@@ -135,6 +166,9 @@ export default defineConfig(({ mode }) => {
   const freesoundKey = env.FREESOUND_API_KEY || '';
   // Firecrawl (web_browser tool): .env.local or shell export (e.g. search-apis.env)
   const firecrawlKey = env.FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY || '';
+  // 'parallel' = anonymous keyless search; 'firecrawl' = key-gated; '' = default
+  // Firecrawl; 'disabled' = off. Mirrored into the capability manifest below.
+  const webSearchProvider = env.WEB_SEARCH_PROVIDER || process.env.WEB_SEARCH_PROVIDER || '';
   const e2bKey = env.E2B_API_KEY || process.env.E2B_API_KEY || '';
   // E2B_TEMPLATE (+ its process.env fallback) is now read live via the keystore getter below.
 
@@ -162,7 +196,10 @@ export default defineConfig(({ mode }) => {
         stock: Boolean(pexelsKey || pixabayKey || unsplashKey || freesoundKey),
         transcription: Boolean(aaiKey),
         sandbox: Boolean(e2bKey),
-        web: Boolean(firecrawlKey),
+        // Parallel Search MCP is anonymous (no key), so the provider setting
+        // alone makes basic web search usable. Keep in sync with
+        // `computeCaps()` in server/keystore.ts.
+        web: Boolean(firecrawlKey) || webSearchProvider === 'parallel',
       }),
     },
     // public/ = user runtime only (media/uploads). Product static files live in assets/

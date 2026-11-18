@@ -67,6 +67,15 @@ interface MediaPoolPanelProps {
   onRelinkAsset?: (id: string, next: MediaAssetRelinkPatch) => void;
   /** Add a solid-color clip. */
   onAddSolid?: () => void;
+  /** The sheet header renders a global search box, so the pool must not draw a
+   *  second one (two stacked search fields). */
+  headerSearch?: boolean;
+  /** Query text from the sheet header; used instead of the local box when
+   *  `headerSearch` is set. */
+  externalQuery?: string;
+  /** Header-owned filter menu state (the sheet header renders the button). */
+  filtersOpen?: boolean;
+  onActiveFilterCountChange?: (count: number) => void;
   /** Start (or retry) ASR for one asset from the pool UI. */
   onTranscribe: (asset: MediaAsset) => void;
 }
@@ -74,7 +83,7 @@ interface MediaPoolPanelProps {
 export function MediaPoolPanel({
   semanticScopeId, assets, folders, fps, usedAssetIds, offlineAssetIds, onAssetLoadError,
   onImport, onImportMobile, directoryImport, directoryImportError, onAddAsset, onAddAssetsToTimeline, onAddAssetsToChat, onCreateFolder, onRenameFolder,
-  onDeleteFolder, onMoveAssets, onRenameAsset, onRenameAssets, onSetFavorite, onSetAssetsFavorite, onRemoveAsset, onRemoveAssets, onPasteAssets, onRelinkAsset, onAddSolid, onTranscribe,
+  onDeleteFolder, onMoveAssets, onRenameAsset, onRenameAssets, onSetFavorite, onSetAssetsFavorite, onRemoveAsset, onRemoveAssets, onPasteAssets, onRelinkAsset, onAddSolid, onTranscribe, headerSearch, externalQuery, filtersOpen, onActiveFilterCountChange,
 }: MediaPoolPanelProps) {
   const t = useT();
   const musicAnalysis = useMusicAnalysisCards(assets);
@@ -85,7 +94,12 @@ export function MediaPoolPanel({
     pickFiles, pickDirectory, handleDrop,
   } = fileImport;
   const { available: canWatchDirectory, busy: watchBusy, activeWatch, start: startWatch, stop: stopWatch } = directoryImport;
-  const [query, setQuery] = useState('');
+  const [localQuery, setQuery] = useState('');
+  // When the sheet header owns the search field it drives the query; the pool
+  // keeps its own state only for the standalone panel (where `headerSearch` is
+  // false). Hiding the box without forwarding the text is what made the header
+  // search look broken — the field wrote to a value nothing read.
+  const query = headerSearch && externalQuery !== undefined ? externalQuery : localQuery;
   const [sort, setSort] = useState<MediaSortKey>('newest');
   const [type, setType] = useState<MediaTypeFilter>('all');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -364,6 +378,9 @@ export function MediaPoolPanel({
         uploadRatio={uploadRatio}
         canAddSolid={!!onAddSolid}
         semanticOpenRequest={semanticOpenRequest}
+        hideSearch={headerSearch}
+        filtersOpen={filtersOpen}
+        onActiveFilterCountChange={onActiveFilterCountChange}
         onQueryChange={setQuery}
         onSemanticResults={onSemanticResults}
         onUpload={() => inputRef.current?.click()}
@@ -403,7 +420,12 @@ export function MediaPoolPanel({
           <span>{t('Drop video, audio or images here — or use Upload to import from this device.')}</span>
         </div>
       )}
-      {assets.length > 0 && <div className="cc-media-export-guide">{t('Open the top-right menu: download original image, video, and audio files, or export MG as a transparent MOV.')}</div>}
+      {assets.length > 0 && (
+        <details className="cc-media-export-guide">
+          <summary>{t('Export & download')}</summary>
+          <p>{t('Open the top-right menu: download original image, video, and audio files, or export MG as a transparent MOV.')}</p>
+        </details>
+      )}
 
       <MediaPoolGrid
         entries={gridEntries}
