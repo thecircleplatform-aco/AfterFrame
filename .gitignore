@@ -118,3 +118,5 @@ public/whisper-cli/
 .node24/
 .node_src/
 
+
+server-dist/
