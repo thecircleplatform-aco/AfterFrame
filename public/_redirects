@@ -3,4 +3,12 @@
 # The router owns the URL space (/projects, /editor/<id>, /docs/<slug>, …), so a
 # cold load of any of them must return index.html with a 200 rather than a 404.
 # `200` here means REWRITE, not redirect — the address bar keeps the deep link.
+
+# `/api/*` is the Node backend (server/), which does NOT run on Pages. Without
+# this rule the SPA catch-all below answers those requests with index.html and a
+# 200, so the client parses HTML as JSON and reports a bogus failure (the
+# settings dialog showed "dev server not ready?" for exactly this). Answer them
+# with an honest 404 + JSON instead, so callers can degrade cleanly.
+# `/api/*` is handled by functions/api/[[path]].js (Pages supports only 3xx and
+# 200 proxying here, not 404 rewrites), and `/auth/*` by functions/auth/.
 /*  /index.html  200

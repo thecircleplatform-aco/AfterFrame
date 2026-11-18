@@ -21,6 +21,7 @@ import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { deflateSync } from 'node:zlib';
 import { uploadDir } from './media-dir.ts';
 
 const DEFAULT_SESSION_TTL_MS = 45 * 60_000;
@@ -42,6 +43,11 @@ export interface RemoteSnapshot {
   readonly liveTool: string | null;
   readonly messages: RemoteMessage[];
   readonly projectName?: string;
+  /**
+   * Set by the desktop tab while it is pushing preview frames. The phone uses it
+   * to show/hide the live preview card without guessing.
+   */
+  readonly previewLive?: boolean;
 }
 
 export interface RemoteAddress {
@@ -51,9 +57,27 @@ export interface RemoteAddress {
   readonly hotspot: boolean;
 }
 
+/**
+ * A public HTTPS entry point for the same session, published by a tunnel.
+ * Nothing about the LAN listener changes: the tunnel forwards to it, so the
+ * phone talks to the same tokenised broker whether it is on the same Wi-Fi or
+ * on mobile data.
+ */
+export interface RemotePublicAddress {
+  /** e.g. `remote.af.acocloud.app` */
+  readonly host: string;
+  readonly url: string;
+}
+
 export interface RemoteSessionSnapshot {
   readonly id: string;
   readonly addresses: RemoteAddress[];
+  /**
+   * Public tunnel URL for this session, when one is configured. The pairing
+   * sheet prefers it (it works off-Wi-Fi and gives HTTPS, which the QR scanner
+   * and camera permissions require).
+   */
+  readonly publicAddress?: RemotePublicAddress;
   readonly expiresAt: number;
   readonly hostAttached: boolean;
   readonly guestCount: number;
@@ -62,7 +86,19 @@ export interface RemoteSessionSnapshot {
 export type RemoteGuestAction =
   | { readonly type: 'prompt'; readonly text: string }
   | { readonly type: 'stop' }
-  | { readonly type: 'image'; readonly name: string; readonly mime: string; readonly url: string };
+  | { readonly type: 'image'; readonly name: string; readonly mime: string; readonly url: string }
+  /** Phone asks the desktop to start sending preview frames. */
+  | { readonly type: 'watch' }
+  /** Phone stopped looking (backgrounded, card closed). */
+  | { readonly type: 'unwatch' };
+
+/** One live preview still, relayed desktop → phone. */
+export interface RemotePreviewFrame {
+  readonly data: string;
+  readonly frame: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 export type RemotePageLocale = 'zh' | 'en' | 'it' | 'ru' | 'ko' | 'th';
 
@@ -80,7 +116,46 @@ interface RemoteSession {
 interface RemoteControlOptions {
   bindHost?: string;
   sessionTtlMs?: number;
+  /**
+   * Pin the listener to a fixed port instead of an ephemeral one.
+   *
+   * A random port is right for LAN-only pairing (nothing needs to find it twice)
+   * but fatal for a tunnel: the public vhost proxies to one fixed upstream, so a
+   * port that changes each boot silently breaks the public URL on restart.
+   * `0` (the default) keeps the old ephemeral behaviour.
+   */
+  port?: number;
+  /**
+   * Public HTTPS origin that forwards to this LAN listener (e.g.
+   * `https://remote.af.acocloud.app`). Set via REMOTE_PUBLIC_ORIGIN; when
+   * absent the phone must be on the same network, which is the default.
+   */
+  publicOrigin?: string;
   log?: (message: string) => void;
+}
+
+/**
+ * Validate and canonicalise the public origin.
+ *
+ * Only `https:` is accepted: the phone's camera (QR scanning) and clipboard both
+ * require a secure context, so an `http:` public origin would silently break the
+ * very features the tunnel exists to enable. A bare host is upgraded to https.
+ * Returns null for anything unusable so a bad env value degrades to "LAN only"
+ * instead of producing a dead QR code.
+ */
+export function normalizePublicOrigin(raw: string | undefined | null): string | null {
+  const value = (raw ?? '').trim();
+  if (!value) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+  // Origin only: any path in the env value would corrupt the /r/<token> route.
+  return url.origin;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -106,6 +181,136 @@ function sseOpen(res: ServerResponse): void {
     'X-Content-Type-Options': 'nosniff',
   });
   res.write(': connected\n\n');
+}
+
+/**
+ * Web app manifest, so the phone page can be installed from the browser.
+ *
+ * `start_url` is relative (`./`) on purpose: the page already lives under
+ * `/r/<token>`, and a relative start_url keeps the installed icon pointing at
+ * the same pairing instead of a hardcoded absolute path that would 404 on the
+ * public domain. `display: standalone` plus a fixed `theme_color` is what makes
+ * the installed app open without browser chrome.
+ */
+function sendManifest(res: ServerResponse, _token: string, locale: RemotePageLocale): void {
+  if (res.destroyed || res.writableEnded) return;
+  const copy = COPY[locale];
+  const manifest = {
+    name: `${copy.title} ${copy.sub}`,
+    short_name: copy.title,
+    description: copy.empty,
+    start_url: './',
+    scope: './',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#000000',
+    theme_color: '#000000',
+    icons: [
+      { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  };
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.end(JSON.stringify(manifest));
+}
+
+/**
+ * Icons are generated rather than shipped as files.
+ *
+ * The service is inlined into the desktop build and has no asset pipeline, and
+ * a binary blob in source would rot silently. A solid black square with a white
+ * play triangle is drawn into a raw RGBA buffer and wrapped in a minimal PNG —
+ * no encoder dependency, no filesystem read at runtime.
+ */
+const iconCache = new Map<number, Buffer>();
+
+function sendIcon(res: ServerResponse, size: number): void {
+  if (res.destroyed || res.writableEnded) return;
+  let png = iconCache.get(size);
+  if (!png) {
+    png = renderIconPng(size);
+    iconCache.set(size, png);
+  }
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Content-Length', String(png.length));
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.end(png);
+}
+
+/** CRC32 (PNG chunk checksum). Table is built once. */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buffer: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const typed = Buffer.concat([Buffer.from(type, 'latin1'), Buffer.from(data)]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(typed), 0);
+  return Buffer.concat([length, typed, crc]);
+}
+
+/** Solid black rounded-ish square with a white triangle, encoded as PNG. */
+export function renderIconPng(size: number): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;   // bit depth
+  header[9] = 6;   // colour type: RGBA
+  header[10] = 0;  // deflate
+  header[11] = 0;  // adaptive filtering
+  header[12] = 0;  // no interlace
+
+  // Filter byte (0 = None) per scanline, then RGBA pixels.
+  const stride = size * 4 + 1;
+  const raw = Buffer.alloc(stride * size);
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = size * 0.34;
+  for (let y = 0; y < size; y += 1) {
+    const row = y * stride;
+    raw[row] = 0;
+    for (let x = 0; x < size; x += 1) {
+      const at = row + 1 + x * 4;
+      // Rounded square mask.
+      const dx = Math.max(0, Math.abs(x - cx) - (size * 0.5 - radius));
+      const dy = Math.max(0, Math.abs(y - cy) - (size * 0.5 - radius));
+      const outside = Math.hypot(dx, dy) > radius;
+      raw[at] = 0; raw[at + 1] = 0; raw[at + 2] = 0;
+      raw[at + 3] = outside ? 0 : 255;
+
+      // White play triangle, centred.
+      const halfH = size * 0.22;
+      const halfW = size * 0.19;
+      const relX = x - (cx - halfW * 0.8);
+      const relY = Math.abs(y - cy);
+      if (relX >= 0 && relX <= halfW * 2 && relY <= halfH * (1 - relX / (halfW * 2))) {
+        raw[at] = 255; raw[at + 1] = 255; raw[at + 2] = 255; raw[at + 3] = 255;
+      }
+    }
+  }
+
+  const idat = pngChunk('IDAT', deflateSync(raw, { level: 9 }));
+  const ihdr = pngChunk('IHDR', header);
+  const iend = pngChunk('IEND', new Uint8Array(0));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr, idat, iend]);
 }
 
 interface BindableAddress {
@@ -225,12 +430,16 @@ export class RemoteControlService {
   private port: number | null = null;
   private starting: Promise<void> | null = null;
   private readonly bindHost: string;
+  private readonly requestedPort: number;
   private readonly sessionTtlMs: number;
+  private readonly publicOrigin: string | null;
   private readonly log: (message: string) => void;
 
   constructor(options: RemoteControlOptions = {}) {
     this.bindHost = options.bindHost ?? '0.0.0.0';
+    this.requestedPort = options.port ?? 0;
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    this.publicOrigin = normalizePublicOrigin(options.publicOrigin);
     this.log = options.log ?? (() => undefined);
   }
 
@@ -309,6 +518,34 @@ export class RemoteControlService {
     return true;
   }
 
+  /**
+   * Relay one preview still to every watching phone.
+   *
+   * Frames are NOT stored on the session: they are live-only evidence, and
+   * holding the last one would let a reconnecting phone paint a stale picture as
+   * if it were current. A phone that reconnects simply waits for the next frame.
+   *
+   * Returns the number of phones that received it, so the desktop can stop
+   * capturing as soon as nobody is watching.
+   */
+  publishPreviewFrame(id: string, frame: RemotePreviewFrame): number {
+    const session = this.sessions.get(id);
+    if (!session) return 0;
+    // A frame is evidence the desktop is alive, so keep the session warm — but
+    // do not extend indefinitely on frames alone (publish/text still governs).
+    let delivered = 0;
+    for (const guest of session.guests) {
+      sseWrite(guest, 'preview', frame);
+      delivered += 1;
+    }
+    return delivered;
+  }
+
+  /** How many phones are currently attached to a session. */
+  guestCount(id: string): number {
+    return this.sessions.get(id)?.guests.size ?? 0;
+  }
+
   private snapshot(session: RemoteSession, bindable: BindableAddress[]): RemoteSessionSnapshot {
     const port = this.port;
     return {
@@ -319,6 +556,9 @@ export class RemoteControlService {
         url: `http://${entry.address}:${port}/r/${session.token}`,
         hotspot: entry.address.startsWith('192.168.137.'),
       })),
+      ...(this.publicOrigin
+        ? { publicAddress: { host: new URL(this.publicOrigin).host, url: `${this.publicOrigin}/r/${session.token}` } }
+        : {}),
       expiresAt: session.expiresAt,
       hostAttached: session.hostListeners.size > 0,
       guestCount: session.guests.size,
@@ -331,7 +571,7 @@ export class RemoteControlService {
     this.starting = new Promise<void>((resolve, reject) => {
       const server = createServer((req, res) => { void this.handle(req, res); });
       server.once('error', reject);
-      server.listen(0, this.bindHost, () => {
+      server.listen(this.requestedPort, this.bindHost, () => {
         const address = server.address();
         if (!address || typeof address === 'string') { reject(new Error('remote control server failed to bind')); return; }
         this.server = server;
@@ -360,13 +600,30 @@ export class RemoteControlService {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
-      const match = /^\/r\/([A-Za-z0-9_-]+)(\/(events|prompt|stop|image|state))?$/.exec(url.pathname);
+      /* The bare origin is the installable entry point: someone who typed
+         remote.af.acocloud.app (or tapped the home-screen icon before pairing)
+         has no token, so they get the shell with only the scanner enabled. */
+      if ((url.pathname === '/' || url.pathname === '') && req.method === 'GET') {
+        this.sendPage(res, 'en', true);
+        return;
+      }
+      const match = /^\/r\/([A-Za-z0-9_-]+)(\/(events|prompt|stop|image|state|watch|unwatch|manifest\.webmanifest|icon-192\.png|icon-512\.png))?$/.exec(url.pathname);
       if (!match) { sendJson(res, 404, { error: 'not found' }); return; }
       const session = this.sessionByToken(match[1]!);
       if (!session) { sendJson(res, 410, { error: 'pairing expired — show a new QR on the desktop' }); return; }
       const action = match[2];
 
       if (!action && req.method === 'GET') { this.sendPage(res, session.locale); return; }
+      /* The desktop is the source of truth; the shell exists only so the phone
+         can install the page and open it from the home screen. */
+      if (action === '/manifest.webmanifest' && req.method === 'GET') {
+        sendManifest(res, match[1]!, session.locale);
+        return;
+      }
+      if ((action === '/icon-192.png' || action === '/icon-512.png') && req.method === 'GET') {
+        sendIcon(res, action === '/icon-512.png' ? 512 : 192);
+        return;
+      }
       if (action === '/state' && req.method === 'GET') { sendJson(res, 200, session.snapshot); return; }
       if (action === '/events' && req.method === 'GET') {
         sseOpen(res);
@@ -388,6 +645,17 @@ export class RemoteControlService {
       if (action === '/stop' && req.method === 'POST') {
         for (const listener of session.hostListeners) listener({ type: 'stop' });
         sendJson(res, 202, { ok: true });
+        return;
+      }
+      /* Preview stream control. The phone asks to watch; the desktop decides how
+         long to keep encoding. Both are idempotent so a reconnecting tab can
+         re-assert its intent without bookkeeping. */
+      if ((action === '/watch' || action === '/unwatch') && req.method === 'POST') {
+        const watching = action === '/watch';
+        for (const listener of session.hostListeners) {
+          listener({ type: watching ? 'watch' : 'unwatch' });
+        }
+        sendJson(res, 202, { ok: true, watching });
         return;
       }
       if (action === '/image' && req.method === 'POST') {
@@ -476,14 +744,14 @@ export class RemoteControlService {
     sendJson(res, 200, { name: originalName, mime, url: mediaUrl, bytes });
   }
 
-  private sendPage(res: ServerResponse, locale: RemotePageLocale): void {
+  private sendPage(res: ServerResponse, locale: RemotePageLocale, unpaired = false): void {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
-    res.end(remotePage(locale));
+    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    res.end(remotePage(locale, unpaired));
   }
 }
 
@@ -494,6 +762,8 @@ const COPY = {
     expired: 'This pairing expired. Show a new QR on the desktop.',
     empty: 'Ask for an edit — the agent works on the project open on your desktop.',
     working: 'Working', attach: 'Attach image', attachFailed: 'Image failed to send',
+    scanQr: 'Scan pairing QR', scanHint: 'Point the camera at the QR code on your desktop', cancel: 'Cancel', scanDenied: 'Camera unavailable — allow camera access, or open the link on the desktop', scanFailed: 'No pairing code found yet', scanNoDecoder: 'This browser cannot decode QR codes — use the phone camera app instead',
+    preview: 'Live preview', previewOff: 'Stop', previewLive: 'LIVE',
     s1: 'Add a title', s2: 'Trim the intro', s3: 'Normalize audio', s4: 'Make it cinematic',
   },
   zh: {
@@ -502,6 +772,8 @@ const COPY = {
     expired: 'Pairing expired — show the QR code again on the desktop.',
     empty: 'Just say what to change; the agent acts on the project open on the desktop.',
     working: 'Working', attach: 'Send image', attachFailed: 'Image upload failed',
+    scanQr: 'Scan pairing QR', scanHint: 'Point the camera at the QR code on your desktop', cancel: 'Cancel', scanDenied: 'Camera unavailable — allow camera access, or open the link on the desktop', scanFailed: 'No pairing code found yet', scanNoDecoder: 'This browser cannot decode QR codes — use the phone camera app instead',
+    preview: 'Live preview', previewOff: 'Stop', previewLive: 'LIVE',
     s1: 'Add a title', s2: 'Trim the intro', s3: 'Normalize volume', s4: 'Make it cinematic',
   },
   ru: {
@@ -510,6 +782,8 @@ const COPY = {
     expired: 'Сеанс истёк. Покажите новый QR на компьютере.',
     empty: 'Скажите, что изменить — агент работает с проектом на компьютере.',
     working: 'Работаю', attach: 'Прикрепить фото', attachFailed: 'Не удалось отправить фото',
+    scanQr: 'Сканировать QR', scanHint: 'Наведите камеру на QR-код на компьютере', cancel: 'Отмена', scanDenied: 'Камера недоступна — разрешите доступ или откройте ссылку на компьютере', scanFailed: 'Код сопряжения не найден', scanNoDecoder: 'Этот браузер не распознаёт QR-коды — используйте камеру телефона',
+    preview: 'Живой просмотр', previewOff: 'Стоп', previewLive: 'LIVE',
     s1: 'Добавь титр', s2: 'Обрежь начало', s3: 'Выровняй звук', s4: 'Сделай кинематографично',
   },
   ko: {
@@ -518,6 +792,8 @@ const COPY = {
     expired: '\ud398\uc5b4\ub9c1\uc774 \ub9cc\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4. \ub370\uc2a4\ud06c\ud1b1\uc5d0\uc11c \uc0c8 QR\uc744 \ud45c\uc2dc\ud558\uc138\uc694.',
     empty: '\ubb34\uc5c7\uc744 \ubc14\uafc0\uc9c0 \uc54c\ub824\uc8fc\uc138\uc694. \uc5d0\uc774\uc804\ud2b8\uac00 \ub370\uc2a4\ud06c\ud1b1\uc758 \uc5f4\ub9b0 \ud504\ub85c\uc81d\ud2b8\ub97c \ud3b8\uc9d1\ud569\ub2c8\ub2e4.',
     working: '\uc791\uc5c5 \uc911', attach: '\uc774\ubbf8\uc9c0 \ucca8\ubd80', attachFailed: '\uc774\ubbf8\uc9c0 \uc804\uc1a1 \uc2e4\ud328',
+    scanQr: '\uc0ac\uc9c4 \uc2a4\uce94', scanHint: '\ub370\uc2a4\ud06c\ud1b1\uc758 QR \ucf54\ub4dc\ub97c \uce74\uba54\ub77c\ub85c \ube44\ucdb0\uc8fc\uc138\uc694', cancel: '\ucde8\uc18c', scanDenied: '\uce74\uba54\ub77c\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4 \u2014 \uad8c\ud55c\uc744 \ud5c8\uc6a9\ud558\uac70\ub098 \ucef4\ud4e8\ud1b0\uc5d0\uc11c \ub9c1\ud06c\ub97c \uc5f4\uc138\uc694', scanFailed: '\ud398\uc5b4\ub9c1 \ucf54\ub4dc\ub97c \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4', scanNoDecoder: '\uc774 \ube0c\ub77c\uc6b0\uc800\ub294 QR \ucf54\ub4dc\ub97c \uc778\uc2dd\ud558\uc9c0 \ubabb\ud569\ub2c8\ub2e4 \u2014 \ud734\ub300\ud3f0 \uce74\uba54\ub77c\ub97c \uc0ac\uc6a9\ud558\uc138\uc694',
+    preview: '\uc2e4\uc2dc\uac04 \ubbf8\ub9ac\ubcf4\uae30', previewOff: '\uc911\uc9c0', previewLive: 'LIVE',
     s1: '\uc81c\ubaa9 \ucd94\uac00', s2: '\uc778\ud2b8\ub85c \uc790\ub974\uae30', s3: '\uc624\ub514\uc624 \uc815\uaddc\ud654', s4: '\uc2dc\ub124\ub9c8\ud2f1\ud558\uac8c',
   },
   th: {
@@ -526,6 +802,8 @@ const COPY = {
     expired: 'การจับคู่หมดอายุ โปรดแสดง QR ใหม่บนคอมพิวเตอร์',
     empty: 'บอกสิ่งที่อยากแก้ เอเจนต์จะทำงานกับโปรเจกต์ที่เปิดบนคอมพิวเตอร์',
     working: 'กำลังทำงาน', attach: 'แนบรูปภาพ', attachFailed: 'ส่งรูปไม่สำเร็จ',
+    scanQr: 'สแกน QR', scanHint: 'หันกล้องไปที่คิวอาร์โค้ดบนคอมพิวเตอร์', cancel: 'ยกเลิก', scanDenied: 'ใช้กล้องไม่ได้ — โปรดอนุญาตการเข้าถึงกล้อง หรือเปิดลิงก์บนคอมพิวเตอร์', scanFailed: 'ยังไม่พบรหัสจับคู่', scanNoDecoder: 'เบราว์เซอร์นี้ไม่รองรับการอ่านคิวอาร์ — โปรดใช้แอปกล้องของโทรศัพท์',
+    preview: 'ดูตัวอย่างสด', previewOff: 'Stop', previewLive: 'LIVE',
     s1: 'เพิ่มชื่อเรื่อง', s2: 'ตัดช่วงเปิด', s3: 'ปรับระดับเสียง', s4: 'ทำให้เป็นหนัง',
   },
   it: {
@@ -534,6 +812,8 @@ const COPY = {
     expired: 'Abbinamento scaduto. Mostra un nuovo QR sul desktop.',
     empty: 'Chiedi una modifica: l\'agente lavora sul progetto aperto sul desktop.',
     working: 'Al lavoro', attach: 'Allega immagine', attachFailed: 'Invio immagine non riuscito',
+    scanQr: 'Scansiona QR', scanHint: 'Inquadra il codice QR sul desktop', cancel: 'Annulla', scanDenied: 'Fotocamera non disponibile — consenti l\'accesso o apri il link sul desktop', scanFailed: 'Nessun codice di abbinamento trovato', scanNoDecoder: 'Questo browser non legge i codici QR — usa la fotocamera del telefono',
+    preview: 'Anteprima live', previewOff: 'Stop', previewLive: 'LIVE',
     s1: 'Aggiungi un titolo', s2: 'Taglia l\'intro', s3: 'Normalizza l\'audio', s4: 'Rendi cinematografico',
   },
 } as const;
@@ -558,7 +838,7 @@ const BRAND_MARK = '<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><def
 const BRAND_GLYPH = '<svg viewBox="0 0 32 32" fill="none" aria-hidden="true">'
   + '<path d="M12.6 9.9a1.15 1.15 0 0 1 1.77-.98l8.62 5.6a1.36 1.36 0 0 1 0 2.29l-8.62 5.6a1.15 1.15 0 0 1-1.77-.98Z" fill="#fff"/></svg>';
 
-function remotePage(locale: RemotePageLocale): string {
+function remotePage(locale: RemotePageLocale, unpaired = false): string {
   const copy = COPY[locale] ?? COPY.en;
   return `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8">
@@ -567,6 +847,8 @@ function remotePage(locale: RemotePageLocale): string {
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>${copy.title} · ${copy.sub}</title>
 <style>
 :root{--bg:#08080b;--raise:#121218;--raise2:#17171f;--line:#232330;--line2:#2e2e3d;
@@ -597,6 +879,30 @@ box-shadow:0 5px 18px color-mix(in srgb,var(--purple) 34%,transparent)}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--dim);flex:0 0 auto;transition:background .25s}
 .dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 16%,transparent)}
 .dot.work{background:var(--pink);animation:blip 1.15s ease-in-out infinite}
+.hd-btn{flex:0 0 auto;width:32px;height:32px;border-radius:10px;display:grid;place-items:center;
+border:1px solid var(--line2);background:var(--raise);color:var(--mid);cursor:pointer;padding:0}
+.hd-btn:active{background:var(--raise2);color:var(--text)}
+.hd-btn svg{width:17px;height:17px}
+
+/* Pairing scanner: the same page is served at the bare public origin, with no
+   token, so a phone that opens remote.af.acocloud.app can scan the QR shown on
+   the desktop and land on its pairing. */
+.scan{position:fixed;inset:0;z-index:60;background:#000;display:none}
+.scan.show{display:block}
+.scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scan-frame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+width:min(68vw,260px);aspect-ratio:1;border-radius:20px;
+box-shadow:0 0 0 100vmax rgba(0,0,0,.62);}
+.scan-frame:before,.scan-frame:after{content:"";position:absolute;inset:0;border-radius:20px}
+.scan-frame:before{border:2px solid rgba(255,255,255,.9)}
+.scan-frame:after{box-shadow:inset 0 0 40px rgba(147,51,234,.55);animation:scanPulse 2s ease-in-out infinite}
+@keyframes scanPulse{0%,100%{opacity:.35}50%{opacity:.9}}
+.scan-hint{position:absolute;left:0;right:0;bottom:calc(28px + env(safe-area-inset-bottom));
+text-align:center;font-size:13.5px;color:#fff;padding:0 28px;line-height:1.5;
+text-shadow:0 1px 8px rgba(0,0,0,.9)}
+.scan-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:14px;
+width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.16);
+color:#fff;font-size:20px;line-height:1;cursor:pointer;display:grid;place-items:center}
 
 @keyframes blip{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 
@@ -671,6 +977,18 @@ border:1px solid var(--line2);border-radius:999px;padding:8px 14px;cursor:pointe
 background:color-mix(in srgb,var(--pink) 14%,transparent);
 border-bottom:1px solid color-mix(in srgb,var(--pink) 28%,transparent)}
 .banner.show{display:block}
+/* Unpaired landing: one clear action, nothing that pretends to be a session. */
+#scanCta{appearance:none;border:0;background:none;color:#ffd6e6;font:inherit;
+font-size:12.5px;font-weight:600;padding:0;cursor:pointer;text-decoration:underline}
+#scanCtaBig{appearance:none;margin-top:22px;padding:14px 26px;border-radius:15px;
+border:0;cursor:pointer;color:#fff;font:inherit;font-size:15px;font-weight:620;
+letter-spacing:-.1px;background:var(--brand);
+box-shadow:0 10px 30px color-mix(in srgb,var(--purple) 38%,transparent)}
+#scanCtaBig:active{transform:scale(.97)}
+.pair-empty{flex:1;display:flex;flex-direction:column;align-items:center;
+justify-content:center;text-align:center;padding:0 34px 60px;gap:2px}
+.pair-empty-title{font-size:19px;font-weight:650;letter-spacing:-.3px}
+.pair-empty-text{margin:0;font-size:13.5px;line-height:1.6;color:var(--dim);max-width:30ch}
 
 footer{flex:0 0 auto;padding:8px 12px calc(9px + env(safe-area-inset-bottom));
 background:linear-gradient(to top,var(--bg) 62%,transparent)}
@@ -701,6 +1019,22 @@ box-shadow:0 5px 16px color-mix(in srgb,var(--purple) 34%,transparent)}
 .send.stop{background:var(--raise2);border:1px solid var(--line2);color:#ff8fa3;box-shadow:none}
 .hint{text-align:center;font-size:10.5px;color:#ff8fa3;min-height:13px;padding-top:2px}
 input[type=file]{display:none}
+
+/* Live preview card. The desktop pushes JPEG stills while this is open; keeping
+   it OUT of the message stream means a frame arriving never re-renders the
+   transcript, and closing it stops the desktop capturing entirely. */
+.watch{position:relative;flex:0 0 auto;margin:0 0 2px;background:#000;
+  border-bottom:1px solid var(--line);overflow:hidden}
+.watch[hidden]{display:none}
+.watch img{display:block;width:100%;max-height:34vh;object-fit:contain;background:#000}
+.watch-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:9px;
+  padding:7px 12px;background:linear-gradient(to top,rgba(0,0,0,.86),rgba(0,0,0,0))}
+.watch-live{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;
+  letter-spacing:.06em;color:#ff5f87}
+.watch-live i{width:6px;height:6px;border-radius:50%;background:#ff5f87;animation:blip 1.3s ease-in-out infinite}
+.watch-pos{margin-left:auto;font-size:10.5px;color:var(--mid);font-variant-numeric:tabular-nums}
+.watch-off{border:0;background:rgba(255,255,255,.14);color:#fff;font:inherit;font-size:11px;
+  padding:4px 10px;border-radius:999px;cursor:pointer}
 </style></head>
 <body>
 <header>
@@ -709,8 +1043,28 @@ input[type=file]{display:none}
     <b>${copy.title} <em>${copy.sub}</em></b>
     <span><i class="dot" id="dot"></i><span id="sub">${copy.connecting}</span></span>
   </div>
+  <button type="button" class="hd-btn" id="scanBtn" aria-label="${copy.scanQr}" title="${copy.scanQr}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>
+      <path d="M3 12h18"/>
+    </svg>
+  </button>
 </header>
+<div class="scan" id="scan" hidden>
+  <video id="scanVideo" playsinline muted></video>
+  <div class="scan-frame"></div>
+  <p class="scan-hint" id="scanHint">${copy.scanHint}</p>
+  <button type="button" class="scan-close" id="scanClose" aria-label="${copy.cancel}">&times;</button>
+</div>
 <div class="banner" id="banner">${copy.expired}</div>
+<div class="watch" id="watch" hidden title="${copy.preview}">
+  <img id="watchImg" alt="${copy.preview}">
+  <div class="watch-bar">
+    <span class="watch-live"><i></i>${copy.previewLive}</span>
+    <span class="watch-pos" id="watchPos"></span>
+    <button type="button" class="watch-off" id="watchOff" aria-label="${copy.previewOff}">${copy.previewOff}</button>
+  </div>
+</div>
 <main id="main"><div class="stream" id="stream"></div></main>
 <footer>
   <div class="tray">
@@ -737,9 +1091,15 @@ input[type=file]{display:none}
 
   var $=function(id){return document.getElementById(id)};
   var base=location.pathname.replace(/\\/$/,'');
+  /* Served at the bare origin: no token to talk to, so nothing connects and the
+     only useful action is the scanner. */
+  var PAIRED=${unpaired ? 'false' : 'true'};
   var main=$('main'),stream=$('stream'),input=$('input'),sendBtn=$('send'),
       attachBtn=$('attach'),fileInput=$('file'),previews=$('previews'),
-      dot=$('dot'),subEl=$('sub'),banner=$('banner'),hint=$('hint');
+      dot=$('dot'),subEl=$('sub'),banner=$('banner'),hint=$('hint'),
+      watch=$('watch'),watchImg=$('watchImg'),watchPos=$('watchPos'),watchOff=$('watchOff'),
+      scanBtn=$('scanBtn'),scan=$('scan'),scanVideo=$('scanVideo'),
+      scanHint=$('scanHint'),scanClose=$('scanClose');
 
   var snap={running:false,liveTool:null,messages:[]};
   var optimistic=null, uploads=[], live=true, renderedKey='', lastBody=null;
@@ -903,14 +1263,29 @@ input[type=file]{display:none}
   });
 
   function connect(){
+    if(!PAIRED) return;
     var es=new EventSource(base+'/events');
-    es.addEventListener('open',function(){ live=true; banner.className='banner'; paint(); });
+    es.addEventListener('open',function(){ live=true; banner.className='banner'; paint(); requestWatch(); });
     es.addEventListener('snapshot',function(e){
       live=true;
       try{
         snap=JSON.parse(e.data);
         if(optimistic&&snap.messages.some(function(m){return m.role==='user'&&m.text===optimistic.text})) optimistic=null;
         paint();
+        /* The desktop advertises whether it is actually pushing frames. If it
+           stopped (dialog closed, project switched), leave preview mode. */
+        if(snap.previewLive!==true && !watch.hidden) watchOff.click();
+      }catch(err){}
+    });
+    /* Preview frames arrive on their own event so a 6 fps picture never
+       re-renders the transcript. Only the <img> src is reassigned. */
+    es.addEventListener('preview',function(e){
+      try{
+        var f=JSON.parse(e.data);
+        if(!f||!f.data) return;
+        watchImg.src='data:image/jpeg;base64,'+f.data;
+        watchPos.textContent=f.frame?('f '+f.frame):'';
+        if(watch.hidden){ watch.hidden=false; requestWatch(); }
       }catch(err){}
     });
     es.addEventListener('error',function(){
@@ -919,6 +1294,87 @@ input[type=file]{display:none}
       paint();
     });
   }
+
+  /* Ask the desktop to start pushing frames. Re-sent whenever the tab becomes
+     visible again, because the desktop stops capturing when nobody is watching
+     and cannot tell a backgrounded tab from a closed one. */
+  function requestWatch(){
+    if(document.hidden) return;
+    fetch(base+'/watch',{method:'POST',headers:{'Content-Type':'application/json'}}
+    ).catch(function(){});
+  }
+
+  watchOff.addEventListener('click',function(){
+    watch.hidden=true;
+    fetch(base+'/unwatch',{method:'POST',headers:{'Content-Type':'application/json'}}).catch(function(){});
+  });
+
+  /* ---- pairing scanner -------------------------------------------------
+     The same page is served at the bare public origin with no token, so the
+     first thing a phone can do is scan the QR the desktop is showing. The scan
+     result is a full pairing URL; navigating to it lands on the tokenised page. */
+  var scanStream=null, scanTimer=null;
+
+  function stopScan(){
+    if(scanTimer!==null){ clearInterval(scanTimer); scanTimer=null; }
+    if(scanStream){ scanStream.getTracks().forEach(function(t){ t.stop(); }); scanStream=null; }
+    scanVideo.srcObject=null; scan.hidden=true; scan.className='scan';
+  }
+
+  /* The QR carries a URL; only accept one that points at a pairing, so a random
+     QR (a menu, a wifi code) cannot navigate the app somewhere unintended. */
+  function pairingFrom(text){
+    try{
+      var u=new URL(text,location.href);
+      if(!u.pathname || u.pathname.indexOf('/r/')===-1) return null;
+      return u.href;
+    }catch(e){ return null; }
+  }
+
+  function startScan(){
+    // Toggle: a second tap on the header button puts the camera away, so the
+    // only way to leave the sensor on is to leave it deliberately.
+    if(!scan.hidden){ stopScan(); return; }
+    scan.hidden=false; scan.className='scan show';
+    scanHint.textContent=COPY.scanHint;
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      scanHint.textContent=COPY.scanDenied; return;
+    }
+    navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(function(s){
+      // The user may have tapped close while the permission prompt was up.
+      // Without this the sensor stays on with no overlay to show it.
+      if(scan.hidden){ s.getTracks().forEach(function(t){ t.stop(); }); return; }
+      scanStream=s; scanVideo.srcObject=s;
+      var p=scanVideo.play(); if(p&&p.catch) p.catch(function(){});
+      if(!('BarcodeDetector' in window)){
+        /* No native decoder (iOS Safari). Rather than ship a decoder, say so
+           honestly — the QR is still scannable with the system camera app. */
+        scanHint.textContent=COPY.scanNoDecoder; return;
+      }
+      var detector=new window.BarcodeDetector({formats:['qr_code']});
+      scanTimer=setInterval(function(){
+        // The overlay may have been dismissed mid-flight; stop decoding and let
+        // the sensor go rather than polling a detached video element forever.
+        if(scan.hidden){ stopScan(); return; }
+        if(scanVideo.readyState<2) return;
+        detector.detect(scanVideo).then(function(codes){
+          for(var i=0;i<codes.length;i++){
+            var target=pairingFrom(codes[i].rawValue||'');
+            if(target){ stopScan(); location.replace(target); return; }
+          }
+        }).catch(function(){});
+      },260);
+    }).catch(function(){ scanHint.textContent=COPY.scanDenied; });
+  }
+
+  scanBtn.addEventListener('click',startScan);
+  scanClose.addEventListener('click',stopScan);
+  // Re-assert the watch request when the tab returns, and drop the camera when
+  // it leaves: a backgrounded page must not hold the camera indicator on.
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){ stopScan(); return; }
+    if(!watch.hidden) requestWatch();
+  });
 
   function sendText(){
     var text=input.value.trim(); if(!text) return;
@@ -948,6 +1404,25 @@ input[type=file]{display:none}
   document.addEventListener('visibilitychange',function(){ if(!document.hidden){ renderedKey=''; paint(); } });
 
   connect(); autosize(); renderInner(); renderedKey=''; paint();
+  if(!PAIRED){
+    /* No session behind this URL, so the composer would only ever 404. Replace
+       the whole surface with one call to action. The camera is NOT opened here:
+       turning on the sensor without a tap trips a permission prompt and lights
+       the recording indicator, so it waits for the user to press the button. */
+    subEl.textContent=COPY.scanQr;
+    /* One action, not three. The banner is left hidden here: the headline and
+       the button below already say the same thing, and repeating it read as a
+       warning when nothing is actually wrong. */
+    main.innerHTML='<div class="pair-empty">'
+      +'<div class="pair-empty-title">'+esc(COPY.scanQr)+'</div>'
+      +'<p class="pair-empty-text">'+esc(COPY.scanHint)+'</p>'
+      +'<button type="button" class="pair-empty-btn" id="scanCtaBig">'+esc(COPY.scanQr)+'</button>'
+      +'</div>';
+    var big=$('scanCtaBig');
+    if(big) big.addEventListener('click',startScan);
+    var footer=document.querySelector('footer');
+    if(footer) footer.setAttribute('hidden','');
+  }
 })();
 </script>
 </body></html>`;
