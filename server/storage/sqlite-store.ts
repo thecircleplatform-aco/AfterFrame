@@ -23,8 +23,38 @@ let databaseHadKvTableAtOpen = false;
 let initialization: Promise<void> | undefined;
 let ready = false;
 
+/**
+ * Set when the store is running from a vault, so the warning below can name the
+ * real location instead of guessing.
+ */
+let configuredStorePath: string | null = null;
+
+/**
+ * Point the store at a specific database file.
+ *
+ * The vault is the authoritative storage root when the user has chosen one: its
+ * `project-store-v1.sqlite3` holds the projects, so a vault folder copied to
+ * another machine carries the timeline as well as the media. This must be
+ * called BEFORE the database is first opened; once a connection exists the
+ * path is fixed for the process, so a relocation has to restart the store.
+ *
+ * Isolated dev profiles deliberately do not consult the vault pointer (see
+ * runtime-profile.ts): a developer's machine-wide vault must not capture a
+ * checkout's data.
+ */
+export function configureSqliteStorePath(path: string | null): void {
+  if (database) throw new Error('cannot change the SQLite store path while the database is open');
+  configuredStorePath = path;
+}
+
 export function storePath(): string {
+  if (configuredStorePath) return configuredStorePath;
   const profile = runtimeProfile();
+  // The vault database wins when the user has chosen a storage folder: that is
+  // what makes a copied vault carry the projects, not just the media.
+  if (profile.mode === 'default' && profile.projectDatabasePath) {
+    return profile.projectDatabasePath;
+  }
   // Keep the database outside the read-only legacy backup directory.
   return join(profile.rootDir, 'project-store-v1.sqlite3');
 }
@@ -106,6 +136,40 @@ export function resetSqliteStoreForTests(): void {
   initialization = undefined;
   ready = false;
   for (const close of connectionClosers) close();
+}
+
+/**
+ * Close every connection so the database file can be moved.
+ *
+ * `DatabaseSync.close()` is what performs the final WAL checkpoint, so this is
+ * the only correct way to make the on-disk file self-contained enough to copy.
+ * The store comes back on the next `initializeSqliteProjectStore()` — and that
+ * call re-reads `storePath()`, which is how the relocation takes effect.
+ *
+ * Returns the number of closers invoked for diagnostics.
+ */
+export function closeSqliteStore(): number {
+  let closed = 0;
+  try {
+    if (database) {
+      database.close();
+      closed += 1;
+    }
+  } finally {
+    database = null;
+    databaseHadKvTableAtOpen = false;
+    initialization = undefined;
+    ready = false;
+  }
+  for (const close of connectionClosers) {
+    try {
+      close();
+      closed += 1;
+    } catch {
+      // A secondary connection that already closed must not block the move.
+    }
+  }
+  return closed;
 }
 
 const encode = (value: unknown): string => JSON.stringify(value);

@@ -30,6 +30,14 @@ interface RuntimeProfileBase {
 export interface DefaultRuntimeProfile extends RuntimeProfileBase {
   readonly mode: 'default';
   readonly id: 'default';
+  /**
+   * The vault's project database, or null when no data directory is configured.
+   *
+   * Only the default profile can carry this. An isolated dev profile keeps its
+   * own store (see resolveRuntimeProfile), so a developer's machine-wide vault
+   * never captures a checkout's data.
+   */
+  readonly projectDatabasePath: string | null;
 }
 
 export interface IsolatedDevRuntimeProfile extends RuntimeProfileBase {
@@ -157,6 +165,15 @@ export function resolveRuntimeProfile(
     id: 'default',
     ...base,
     authDir: authOverride || base.authDir,
+    // The vault's project database, when one exists. Resolved here rather than
+    // in the store so every consumer agrees on the same file, and so an
+    // isolated dev profile can never be captured by it (that branch returned
+    // above and never reads the pointer).
+    //
+    // Only the DATABASE travels this way: accounts stay in the profile, because
+    // copying a project folder to someone else must not carry your credentials
+    // with it.
+    projectDatabasePath: dataDir ? join(dataDir, 'project-store-v1.sqlite3') : null,
   });
 }
 
