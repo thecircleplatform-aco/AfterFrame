@@ -163,7 +163,7 @@ gate guards storage.
 ```powershell
 cd auth-worker
 $env:CLOUDFLARE_API_TOKEN = (Get-Content ../.cf-token.local -Raw).Trim()
-$env:CLOUDFLARE_ACCOUNT_ID = '98fe95a33157fd2e8b990bd5132894c9'
+$env:CLOUDFLARE_ACCOUNT_ID = '<your-cloudflare-account-id>'
 
 npx wrangler d1 execute afterframe-auth --remote --file=schema.sql   # idempotent
 npx wrangler deploy

@@ -18,7 +18,7 @@ desktop build and the local Node server are untouched.
 
 ## Live Cloudflare state (verified)
 
-- Account: `Theacoteam2020@gmail.com` — id `98fe95a33157fd2e8b990bd5132894c9`
+- Account: `<your-cloudflare-account-email>` — id `<your-cloudflare-account-id>`
 - Pages project **`afterframe`** exists, serving
   `afterframe-2a6.pages.dev`, `afterframe.acocloud.app`, `docs.afterframe.acocloud.app`
 - **0 Workers** exist in this account — the four workers the configs name
@@ -45,7 +45,7 @@ Then:
 
 ```powershell
 $env:CLOUDFLARE_API_TOKEN = "<new token>"
-$env:CLOUDFLARE_ACCOUNT_ID = "98fe95a33157fd2e8b990bd5132894c9"
+$env:CLOUDFLARE_ACCOUNT_ID = "<your-cloudflare-account-id>"
 npm run cf:deploy:workers
 npm run cf:d1:schema      # first run only: creates the auth tables
 npm run cf:deploy:pages

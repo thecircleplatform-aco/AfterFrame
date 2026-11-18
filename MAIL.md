@@ -1,10 +1,10 @@
 # Mail
 
 Cloudflare Email Routing on `acocloud.app` — receive + forward, no third-party SMTP. Every address
-below forwards to **theacoteam2020@gmail.com** (verified destination).
+below forwards to the inbox configured as the verified destination.
 
 Rebuild / extend at any time with `node scripts/cf-mail-setup.mjs` — it is idempotent and only adds
-what is missing.
+what is missing. It reads `CF_ACCOUNT_ID`, `CF_ZONE_ID` and `CF_MAIL_INBOX` from the environment.
 
 ## acocloud.app — the company
 
